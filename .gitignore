@@ -1,0 +1,54 @@
+# .NET / MSBuild outputs
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+x86/
+x64/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+artifacts/
+publish/
+
+# Visual Studio / Rider / VS Code
+.vs/
+.idea/
+.vscode/
+*.user
+*.rsuser
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Tests, coverage and NuGet build artifacts
+[Tt]est[Rr]esult*/
+coverage/
+coverage.*
+*.coverage
+*.coveragexml
+*.nupkg
+*.snupkg
+
+# Runtime and local diagnostic files
+*.log
+*.cache
+*.tmp
+*.bak
+*.dmp
+*.pdb
+EBWebView/
+
+# Local secrets / signing material
+*.pfx
+*.p12
+*.key
+
+# Codex / local agent state
+.agents/
+.codex/
+
+# Windows metadata
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/

@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>QHR.Overtime</AssemblyName>
+    <RootNamespace>QHR</RootNamespace>
+    <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
+    <Version>1.2.0</Version>
+    <AssemblyVersion>1.2.0.0</AssemblyVersion>
+    <FileVersion>1.2.0.0</FileVersion>
+    <InformationalVersion>1.2</InformationalVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4078.44" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Remove="Assets\AppIcon.ico" />
+    <Resource Include="Assets\AppIcon.ico" />
+    <None Update="README.md" CopyToPublishDirectory="PreserveNewest" />
+    <None Update="update.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <Target Name="CreateDistributionZip" AfterTargets="Publish"
+          Condition="'$(Configuration)' == 'Release' and '$(RuntimeIdentifier)' != ''">
+    <PropertyGroup>
+      <DistributionDirectory>$(MSBuildProjectDirectory)\artifacts</DistributionDirectory>
+      <DistributionZip>$(DistributionDirectory)\QHR.Overtime-$(RuntimeIdentifier)-$(Configuration).zip</DistributionZip>
+    </PropertyGroup>
+    <MakeDir Directories="$(DistributionDirectory)" />
+    <ZipDirectory SourceDirectory="$(PublishDir)" DestinationFile="$(DistributionZip)" Overwrite="true" />
+    <Message Text="分发包已生成：$(DistributionZip)" Importance="high" />
+  </Target>
+</Project>
