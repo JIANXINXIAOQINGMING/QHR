@@ -35,7 +35,7 @@ public sealed class EncryptedAttendanceCache
     }
 
     public string CachePath { get; }
-    private string LeaveApprovalBackfillMarkerPath => CachePath + ".leave-v1";
+    private string LeaveApprovalBackfillMarkerPath => CachePath + ".leave-v2";
     public bool NeedsLeaveApprovalBackfill =>
         File.Exists(CachePath) && !File.Exists(LeaveApprovalBackfillMarkerPath);
 
@@ -61,7 +61,7 @@ public sealed class EncryptedAttendanceCache
                 var encryptedBytes = await File.ReadAllBytesAsync(CachePath, cancellationToken);
                 plainBytes = UnprotectForCurrentUser(encryptedBytes);
                 var envelope = JsonSerializer.Deserialize<AttendanceArchive>(plainBytes, JsonOptions);
-                if (envelope is null || envelope.Version != 1)
+                if (envelope is null || envelope.Version is < 1 or > 2)
                 {
                     throw new InvalidDataException("不支持的本地考勤档案版本");
                 }
@@ -190,7 +190,7 @@ public sealed class EncryptedAttendanceCache
 
     private sealed class AttendanceArchive
     {
-        public int Version { get; init; } = 1;
+        public int Version { get; init; } = 2;
         public DateTimeOffset SavedAt { get; init; }
         public List<CachedAttendanceRecord> Records { get; init; } = [];
     }
@@ -202,6 +202,7 @@ public sealed class EncryptedAttendanceCache
         public DateTime? ClockOut { get; init; }
         public List<DateTime> CardTimes { get; init; } = [];
         public double LeaveHours { get; init; }
+        public List<LeaveEntry> LeaveEntries { get; init; } = [];
         public double DelayedDeductionMinutes { get; init; }
         public double QhrMealAllowanceCount { get; init; }
         public string ShiftName { get; init; } = string.Empty;
@@ -213,6 +214,7 @@ public sealed class EncryptedAttendanceCache
             ClockOut = record.ClockOut,
             CardTimes = record.CardTimes.OrderBy(item => item).ToList(),
             LeaveHours = record.LeaveHours,
+            LeaveEntries = record.LeaveEntries.ToList(),
             DelayedDeductionMinutes = record.DelayedDeductionMinutes,
             QhrMealAllowanceCount = record.QhrMealAllowanceCount,
             ShiftName = record.ShiftName
@@ -225,6 +227,7 @@ public sealed class EncryptedAttendanceCache
             ClockOut = ClockOut,
             CardTimes = CardTimes.OrderBy(item => item).ToArray(),
             LeaveHours = LeaveHours,
+            LeaveEntries = (LeaveEntries ?? []).ToArray(),
             DelayedDeductionMinutes = DelayedDeductionMinutes,
             QhrMealAllowanceCount = QhrMealAllowanceCount,
             ShiftName = ShiftName

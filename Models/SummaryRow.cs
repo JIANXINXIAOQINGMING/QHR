@@ -11,6 +11,8 @@ public sealed class SummaryRow
     public double EquivalentDays => Math.Round(TotalHours / 8d, 2, MidpointRounding.AwayFromZero);
     public double DelayDeductedHours { get; init; }
     public double LeaveHours { get; init; }
+    public double PersonalLeaveHours { get; init; }
+    public double AnnualLeaveHours { get; init; }
     public double LeaveDeductedHours { get; init; }
     public decimal OvertimePay { get; init; }
     public int MealAllowanceCount { get; init; }

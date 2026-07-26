@@ -64,7 +64,6 @@ public sealed class SettingsService
         {
             settings.FlexibleWorkStartEarliest = "08:30";
             settings.FlexibleWorkStartLatest = "09:30";
-            settings.StandardWorkSpanHours = 9;
             settings.WorkdayOvertimeStart = "19:00";
             settings.DeductLunchBreak = false;
             settings.DeductDinnerBreak = false;

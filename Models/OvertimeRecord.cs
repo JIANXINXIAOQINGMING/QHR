@@ -28,13 +28,16 @@ public sealed class OvertimeRecord
         ? KindText
         : $"{KindText} · {HolidayName}";
     public decimal HourlyRate { get; init; }
-    public string ScheduledClockOutText { get; init; } = "--:--";
     public double GrossHours { get; init; }
     public string GrossDurationText => FormatDuration(GrossHours);
+    public decimal GrossOvertimePay { get; set; }
     public double DelayedHours { get; init; }
     public double DelayDeductedHours { get; init; }
     public string DelayDeductedDurationText => FormatDuration(DelayDeductedHours);
     public double LeaveHours { get; init; }
+    public double PersonalLeaveHours { get; init; }
+    public double AnnualLeaveHours { get; init; }
+    public string LeaveSummaryText { get; init; } = string.Empty;
     public double LeaveDeductedHours { get; set; }
     public string LeaveDeductedDurationText => FormatDuration(LeaveDeductedHours);
     public double Hours { get; set; }
@@ -42,12 +45,15 @@ public sealed class OvertimeRecord
     public decimal OvertimePay { get; set; }
     public decimal MealAllowance { get; set; }
     public int MealAllowanceCount { get; init; }
+    public decimal GrossAmount => GrossOvertimePay + MealAllowance;
     public decimal Amount { get; set; }
     public string SourceDescription { get; set; } = string.Empty;
 
     private static string FormatDuration(double hours)
     {
-        var totalMinutes = Math.Max(0, (int)Math.Round(hours * 60d, MidpointRounding.AwayFromZero));
-        return $"{totalMinutes / 60}h{totalMinutes % 60:00}m";
+        var totalMinutes = (int)Math.Round(hours * 60d, MidpointRounding.AwayFromZero);
+        var sign = totalMinutes < 0 ? "-" : string.Empty;
+        var absoluteMinutes = Math.Abs(totalMinutes);
+        return $"{sign}{absoluteMinutes / 60}h{absoluteMinutes % 60:00}m";
     }
 }

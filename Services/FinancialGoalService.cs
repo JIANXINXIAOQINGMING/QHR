@@ -41,7 +41,7 @@ public sealed class FinancialGoalService
                 var encryptedBytes = await File.ReadAllBytesAsync(StoragePath, cancellationToken);
                 plainBytes = EncryptedAttendanceCache.UnprotectForCurrentUser(encryptedBytes);
                 var data = JsonSerializer.Deserialize<FinancialGoalData>(plainBytes, JsonOptions);
-                if (data is null || data.Version is < 1 or > 2)
+                if (data is null || data.Version is < 1 or > 4)
                     throw new InvalidDataException("不支持的目标档案版本");
                 if (data.Version == 1)
                 {
@@ -51,9 +51,10 @@ public sealed class FinancialGoalService
                         data.GoalName = string.Empty;
                         data.TargetAmount = 0;
                     }
-                    data.Version = 2;
                 }
                 data.Expenses ??= [];
+                data.CompletedGoals ??= [];
+                data.Version = 4;
                 return data;
             }
             catch (Exception ex) when (ex is Win32Exception or JsonException or InvalidDataException or IOException or UnauthorizedAccessException)

@@ -231,7 +231,7 @@ public sealed class QhrClient : IDisposable
             .GroupBy(item => item.Date)
             .ToDictionary(group => group.Key, group => group.Last());
         IReadOnlyDictionary<DateOnly, double> delayedDeductionsByDate;
-        IReadOnlyDictionary<DateOnly, double> approvedLeaveHoursByDate;
+        IReadOnlyDictionary<DateOnly, IReadOnlyList<LeaveEntry>> approvedLeavesByDate;
         var approvalCurrentMonth = new DateOnly(DateTime.Today.Year, DateTime.Today.Month, 1);
         var approvalOnlineStart = refreshRecentMonths
             ? approvalCurrentMonth.AddMonths(-1)
@@ -268,16 +268,17 @@ public sealed class QhrClient : IDisposable
             progress?.Report(needsHistoricalLeaveBackfill
                 ? "正在一次性补齐本地历史请假审批档案…"
                 : $"正在读取 {approvalRangeText} 已完成的请假申请…");
-            approvedLeaveHoursByDate = await FetchApprovedLeaveHoursAsync(
+            var approvedLeaveResult = await FetchApprovedLeavesByDateAsync(
                 leaveSyncStart,
                 approvalOnlineEnd,
                 cancellationToken);
-            leaveApprovalSyncSucceeded = true;
+            approvedLeavesByDate = approvedLeaveResult.LeavesByDate;
+            leaveApprovalSyncSucceeded = approvedLeaveResult.BackfillComplete;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // 单个审批流偶发不可用时不影响其他数据源，历史请假随后由加密档案补回。
-            approvedLeaveHoursByDate = new Dictionary<DateOnly, double>();
+            approvedLeavesByDate = new Dictionary<DateOnly, IReadOnlyList<LeaveEntry>>();
             progress?.Report("请假申请同步失败，正在使用本地加密档案补回…");
         }
         var today = DateOnly.FromDateTime(DateTime.Today);
@@ -285,13 +286,15 @@ public sealed class QhrClient : IDisposable
         var freshRecords = cardsByDate.Keys
             .Concat(summaryByDate.Keys)
             .Concat(delayedDeductionsByDate.Keys)
-            .Concat(approvedLeaveHoursByDate.Keys)
+            .Concat(approvedLeavesByDate.Keys)
             .Distinct()
             .OrderBy(date => date)
             .Select(date =>
             {
                 var times = cardsByDate.GetValueOrDefault(date) ?? Array.Empty<DateTime>();
                 var summary = summaryByDate.GetValueOrDefault(date);
+                var leaveEntries = approvedLeavesByDate.GetValueOrDefault(date) ?? Array.Empty<LeaveEntry>();
+                var approvedLeaveHours = leaveEntries.Sum(item => Math.Max(0, item.Hours));
                 return new AttendanceRecord
                 {
                     Date = date,
@@ -300,10 +303,11 @@ public sealed class QhrClient : IDisposable
                     CardTimes = times,
                     // QHR 当天尚未结算时会临时返回整日缺勤，避免把今天误判成请假。
                     // 请假审批流比月度考勤汇总更及时；取较大值可避免同一请假重复抵扣。
-                    LeaveHours = date < today
-                        ? Math.Max(Math.Max(0, summary?.LeaveHours ?? 0),
-                            approvedLeaveHoursByDate.GetValueOrDefault(date))
-                        : 0,
+                    // 当天的月度汇总可能临时返回整日缺勤，只忽略汇总值；已完成审批仍按实际日期保留。
+                    LeaveHours = Math.Max(
+                        date < today ? Math.Max(0, summary?.LeaveHours ?? 0) : 0,
+                        approvedLeaveHours),
+                    LeaveEntries = leaveEntries,
                     DelayedDeductionMinutes = Math.Max(0, delayedDeductionsByDate.GetValueOrDefault(date)),
                     QhrMealAllowanceCount = Math.Max(0, summary?.MealAllowanceCount ?? 0),
                     ShiftName = summary?.ShiftName ?? string.Empty
@@ -366,8 +370,6 @@ public sealed class QhrClient : IDisposable
         var merged = cachedRecords
             .GroupBy(item => item.Date)
             .ToDictionary(group => group.Key, group => group.Last());
-        var today = DateOnly.FromDateTime(DateTime.Today);
-
         foreach (var fresh in freshRecords)
         {
             if (!merged.TryGetValue(fresh.Date, out var cached))
@@ -379,11 +381,12 @@ public sealed class QhrClient : IDisposable
             var cardTimes = fresh.CardTimes.Count > 0
                 ? fresh.CardTimes.OrderBy(item => item).ToArray()
                 : cached.CardTimes.OrderBy(item => item).ToArray();
-            var leaveHours = fresh.Date == today
-                ? 0
-                : fresh.LeaveHours > 0
-                    ? fresh.LeaveHours
-                    : cached.LeaveHours;
+            var leaveHours = fresh.LeaveHours > 0
+                ? fresh.LeaveHours
+                : cached.LeaveHours;
+            var leaveEntries = fresh.LeaveEntries.Count > 0
+                ? fresh.LeaveEntries
+                : cached.LeaveEntries;
             merged[fresh.Date] = new AttendanceRecord
             {
                 Date = fresh.Date,
@@ -391,6 +394,7 @@ public sealed class QhrClient : IDisposable
                 ClockOut = cardTimes.Length > 0 ? cardTimes[^1] : fresh.ClockOut ?? cached.ClockOut,
                 CardTimes = cardTimes,
                 LeaveHours = Math.Max(0, leaveHours),
+                LeaveEntries = leaveEntries.ToArray(),
                 DelayedDeductionMinutes = fresh.DelayedDeductionMinutes > 0
                     ? fresh.DelayedDeductionMinutes
                     : cached.DelayedDeductionMinutes,
@@ -495,7 +499,7 @@ public sealed class QhrClient : IDisposable
                     .Sum(item => item.First().Minutes), 2, MidpointRounding.AwayFromZero));
     }
 
-    private async Task<IReadOnlyDictionary<DateOnly, double>> FetchApprovedLeaveHoursAsync(
+    private async Task<ApprovedLeaveFetchResult> FetchApprovedLeavesByDateAsync(
         DateOnly startDate,
         DateOnly endDate,
         CancellationToken cancellationToken)
@@ -559,44 +563,63 @@ public sealed class QhrClient : IDisposable
             .GroupBy(item => item.AuthKey, StringComparer.Ordinal)
             .Select(group => group.First())
             .ToArray();
-        var hintedLeaves = relevantCandidates
-            .Where(item => item.DateHint is not null && item.HoursHint > 0)
-            .Select(item => new ApprovedLeave(
-                item.DateHint!.Value,
-                item.HoursHint,
-                item.AuthKey))
-            .ToArray();
-        var detailCandidates = relevantCandidates
-            .Where(item => item.DateHint is null || item.HoursHint <= 0)
-            .ToArray();
         using var gate = new SemaphoreSlim(4, 4);
-        var detailTasks = detailCandidates.Select(async candidate =>
+        var detailTasks = relevantCandidates.Select(async candidate =>
         {
             await gate.WaitAsync(cancellationToken);
             try
             {
-                return await FetchApprovedLeaveDetailAsync(candidate.AuthKey, cancellationToken);
+                var details = await FetchApprovedLeaveDetailAsync(candidate.AuthKey, cancellationToken);
+                if (details.Count > 0)
+                {
+                    var normalizedDetails = details
+                        .Select(item => item.Kind == LeaveKind.Unknown && candidate.KindHint != LeaveKind.Unknown
+                            ? item with { Kind = candidate.KindHint, TypeName = candidate.TypeNameHint }
+                            : item)
+                        .ToArray();
+                    return new ApprovedLeaveCandidateResult(
+                        normalizedDetails,
+                        normalizedDetails.Any(item => item.Kind == LeaveKind.Unknown));
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // 单条详情失败时保留列表页提示，未知类型只展示、不抵扣，避免误扣加班费。
             }
             finally
             {
                 gate.Release();
             }
+            // 列表页日期可能是申请日期，不拿它冒充实际请假日期；等待下次详情同步或使用本地档案。
+            return new ApprovedLeaveCandidateResult([], true);
         }).ToArray();
         var detailResults = await Task.WhenAll(detailTasks);
 
-        return detailResults
-            .SelectMany(item => item)
-            .Concat(hintedLeaves)
+        var leavesByDate = detailResults
+            .SelectMany(item => item.Leaves)
             .Where(item => item.Date >= startDate && item.Date <= endDate && item.Hours > 0)
             .GroupBy(item => item.Date)
             .ToDictionary(
                 group => group.Key,
-                group => Math.Round(group
+                group => (IReadOnlyList<LeaveEntry>)group
                     .GroupBy(item => string.IsNullOrWhiteSpace(item.RecordId)
-                        ? $"{item.Date:yyyy-MM-dd}:{item.Hours:0.####}"
+                        ? $"{item.Date:yyyy-MM-dd}:{item.Kind}:{item.Hours:0.####}"
                         : item.RecordId,
                         StringComparer.Ordinal)
-                    .Sum(item => item.First().Hours), 4, MidpointRounding.AwayFromZero));
+                    .Select(item => item.First())
+                    .GroupBy(item => new { item.Kind, item.TypeName })
+                    .Select(items => new LeaveEntry
+                    {
+                        Kind = items.Key.Kind,
+                        SourceTypeName = items.Key.TypeName,
+                        Hours = Math.Round(items.Sum(item => item.Hours), 4,
+                            MidpointRounding.AwayFromZero)
+                    })
+                    .OrderBy(item => item.Kind)
+                    .ToArray());
+        return new ApprovedLeaveFetchResult(
+            leavesByDate,
+            detailResults.All(item => !item.HadUnresolvedType));
     }
 
     private async Task<IReadOnlyList<ApprovedLeave>> FetchApprovedLeaveDetailAsync(
@@ -707,10 +730,13 @@ public sealed class QhrClient : IDisposable
                 TryGetString(element, "AUTHKEY", out var authKey))
             {
                 var abstracts = TryGetString(element, "ABSTRACTS", out var text) ? text : string.Empty;
+                var kindHint = ReadLeaveKind(abstracts, out var typeNameHint);
                 result.Add(new WorkflowApprovalCandidate(
                     authKey,
                     TryReadDateHint(abstracts),
-                    TryReadLeaveHoursHint(abstracts)));
+                    TryReadLeaveHoursHint(abstracts),
+                    kindHint,
+                    typeNameHint));
                 return;
             }
 
@@ -795,29 +821,43 @@ public sealed class QhrClient : IDisposable
 
     private static void CollectApprovedLeaves(
         JsonElement element,
-        ICollection<ApprovedLeave> result)
+        ICollection<ApprovedLeave> result,
+        LeaveKind inheritedKind = LeaveKind.Unknown,
+        string inheritedTypeName = "")
     {
         if (element.ValueKind == JsonValueKind.Object)
         {
+            var localKind = ReadLeaveKindFromObject(element, out var localTypeName);
+            if (localKind == LeaveKind.Unknown)
+            {
+                localKind = inheritedKind;
+                localTypeName = inheritedTypeName;
+            }
             if (TryGetDouble(element, "AMOUNT", out var hours) && hours > 0 &&
                 TryGetString(element, "BEGINTIME", out var beginText) &&
-                TryParseDate(beginText, out var date))
+                TryParseDateTime(beginText, out var beginTime))
             {
                 var recordId = TryGetString(element, "ID", out var id) ? id : string.Empty;
-                result.Add(new ApprovedLeave(date, hours, recordId));
+                DateTime? endTime = null;
+                if (TryGetString(element, "ENDTIME", out var endText) &&
+                    TryParseDateTime(endText, out var parsedEnd))
+                {
+                    endTime = parsedEnd;
+                }
+                AddApprovedLeaveDays(result, beginTime, endTime, hours, localKind, localTypeName, recordId);
                 return;
             }
 
             foreach (var property in element.EnumerateObject())
             {
-                CollectApprovedLeaves(property.Value, result);
+                CollectApprovedLeaves(property.Value, result, localKind, localTypeName);
             }
         }
         else if (element.ValueKind == JsonValueKind.Array)
         {
             foreach (var item in element.EnumerateArray())
             {
-                CollectApprovedLeaves(item, result);
+                CollectApprovedLeaves(item, result, inheritedKind, inheritedTypeName);
             }
         }
     }
@@ -839,6 +879,89 @@ public sealed class QhrClient : IDisposable
                    CultureInfo.InvariantCulture, out var hours)
             ? Math.Max(0, hours)
             : 0;
+    }
+
+    private static LeaveKind ReadLeaveKindFromObject(JsonElement element, out string typeName)
+    {
+        var preferredNames = new[]
+        {
+            "LEAVETYPE", "LEAVE_TYPE", "VACATIONTYPE", "VACATION_TYPE", "ABSTYPE", "ABSENCE_TYPE",
+            "HOLIDAYTYPE", "HOLIDAY_TYPE", "HOLTYPE", "LEAVEKIND", "LEAVE_KIND", "VACATIONKIND",
+            "TYPE", "TYPENAME", "TYPE_NAME", "KIND", "KINDNAME"
+        };
+        foreach (var name in preferredNames)
+        {
+            if (!TryGetString(element, name, out var value)) continue;
+            var kind = ReadLeaveKind(value, out typeName);
+            if (kind != LeaveKind.Unknown) return kind;
+        }
+
+        foreach (var property in element.EnumerateObject())
+        {
+            if (property.Value.ValueKind != JsonValueKind.String) continue;
+            var kind = ReadLeaveKind(property.Value.GetString() ?? string.Empty, out typeName);
+            if (kind != LeaveKind.Unknown) return kind;
+        }
+        typeName = string.Empty;
+        return LeaveKind.Unknown;
+    }
+
+    private static LeaveKind ReadLeaveKind(string text, out string typeName)
+    {
+        if (text.Contains("年假", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("annual leave", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("annual vacation", StringComparison.OrdinalIgnoreCase))
+        {
+            typeName = "年假";
+            return LeaveKind.Annual;
+        }
+        if (text.Contains("事假", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("personal leave", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("unpaid leave", StringComparison.OrdinalIgnoreCase))
+        {
+            typeName = "事假";
+            return LeaveKind.Personal;
+        }
+        typeName = string.Empty;
+        return LeaveKind.Unknown;
+    }
+
+    private static void AddApprovedLeaveDays(
+        ICollection<ApprovedLeave> result,
+        DateTime beginTime,
+        DateTime? endTime,
+        double totalHours,
+        LeaveKind kind,
+        string typeName,
+        string recordId)
+    {
+        var startDate = DateOnly.FromDateTime(beginTime);
+        var finalDate = endTime is null || endTime.Value < beginTime
+            ? startDate
+            : DateOnly.FromDateTime(endTime.Value);
+        var dates = new List<DateOnly>();
+        for (var date = startDate; date <= finalDate; date = date.AddDays(1))
+        {
+            if (date.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday)) dates.Add(date);
+        }
+        if (dates.Count == 0) dates.Add(startDate);
+
+        var remaining = Math.Max(0, totalHours);
+        for (var index = 0; index < dates.Count && remaining > 0; index++)
+        {
+            var date = dates[index];
+            var isLast = index == dates.Count - 1;
+            var capacity = isLast ? remaining : Math.Min(8d, remaining);
+            var allocated = Math.Round(Math.Max(0, capacity), 4, MidpointRounding.AwayFromZero);
+            if (allocated <= 0) continue;
+            result.Add(new ApprovedLeave(
+                date,
+                allocated,
+                kind,
+                typeName,
+                string.IsNullOrWhiteSpace(recordId) ? string.Empty : $"{recordId}:{date:yyyyMMdd}"));
+            remaining = Math.Max(0, remaining - allocated);
+        }
     }
 
     private static bool IsCompletedStatus(string status) =>
@@ -1059,6 +1182,14 @@ public sealed class QhrClient : IDisposable
         return false;
     }
 
+    private static bool TryParseDateTime(string value, out DateTime dateTime)
+    {
+        return DateTime.TryParse(value, CultureInfo.InvariantCulture,
+                   DateTimeStyles.AllowWhiteSpaces, out dateTime) ||
+               DateTime.TryParse(value, CultureInfo.CurrentCulture,
+                   DateTimeStyles.AllowWhiteSpaces, out dateTime);
+    }
+
     private static bool TryParseDate(string value, out DateOnly date)
     {
         if (DateOnly.TryParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture,
@@ -1102,6 +1233,22 @@ public sealed class QhrClient : IDisposable
         string ShiftName);
     private sealed record DelayedApprovalCandidate(string AuthKey, DateOnly? DateHint);
     private sealed record DelayedDeduction(DateOnly Date, double Minutes, string RecordId);
-    private sealed record WorkflowApprovalCandidate(string AuthKey, DateOnly? DateHint, double HoursHint);
-    private sealed record ApprovedLeave(DateOnly Date, double Hours, string RecordId);
+    private sealed record WorkflowApprovalCandidate(
+        string AuthKey,
+        DateOnly? DateHint,
+        double HoursHint,
+        LeaveKind KindHint,
+        string TypeNameHint);
+    private sealed record ApprovedLeave(
+        DateOnly Date,
+        double Hours,
+        LeaveKind Kind,
+        string TypeName,
+        string RecordId);
+    private sealed record ApprovedLeaveCandidateResult(
+        IReadOnlyList<ApprovedLeave> Leaves,
+        bool HadUnresolvedType);
+    private sealed record ApprovedLeaveFetchResult(
+        IReadOnlyDictionary<DateOnly, IReadOnlyList<LeaveEntry>> LeavesByDate,
+        bool BackfillComplete);
 }

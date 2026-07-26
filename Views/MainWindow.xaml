@@ -2,12 +2,17 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:models="clr-namespace:QHR.Models"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         Title="QHR 加班助手" Icon="/Assets/AppIcon.ico" Width="1380" Height="860"
         MinWidth="1120" MinHeight="700" WindowStartupLocation="CenterScreen"
-        WindowStyle="None" ResizeMode="CanResizeWithGrip"
-        AllowsTransparency="True" Background="Transparent">
-    <Border Margin="14" CornerRadius="22" Background="{StaticResource WindowBackgroundBrush}"
-            BorderBrush="#CFFFFFFF" BorderThickness="1" Effect="{StaticResource PanelShadow}">
+        WindowStyle="None" ResizeMode="CanResize"
+        AllowsTransparency="False" Background="{StaticResource WindowBackgroundBrush}">
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="0" ResizeBorderThickness="6" GlassFrameThickness="0"
+                            CornerRadius="0" UseAeroCaptionButtons="False" />
+    </shell:WindowChrome.WindowChrome>
+    <Border Margin="0" CornerRadius="0" Background="{StaticResource WindowBackgroundBrush}"
+            BorderThickness="0" Effect="{x:Null}">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="54" />
@@ -46,7 +51,10 @@
                                 <MenuItem Header="检查更新" Click="CheckForUpdatesMenuItem_Click" />
                                 <MenuItem Header="QHR 请求诊断" Click="OpenDiagnosticsMenuItem_Click" />
                                 <Separator />
-                                <MenuItem x:Name="VersionMenuItem" Header="版本 v1.2" IsEnabled="False" />
+                                <MenuItem Header="备份全部数据" Click="BackupAllDataMenuItem_Click" />
+                                <MenuItem Header="导入备份" Click="ImportBackupMenuItem_Click" />
+                                <Separator />
+                                <MenuItem x:Name="VersionMenuItem" Header="版本 v1.3.16" IsEnabled="False" />
                                 <MenuItem Header="退出登录" Foreground="{StaticResource DangerBrush}" Click="LogoutButton_Click" />
                             </ContextMenu>
                         </Button.ContextMenu>
@@ -118,16 +126,18 @@
                                     <Grid>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="175" />
-                                            <ColumnDefinition Width="24" />
-                                            <ColumnDefinition Width="175" />
+                                            <ColumnDefinition Width="120" />
+                                            <ColumnDefinition Width="12" />
+                                            <ColumnDefinition Width="100" />
                                             <ColumnDefinition Width="*" />
                                         </Grid.ColumnDefinitions>
-                                        <TextBlock Text="统计区间" FontWeight="SemiBold" Margin="0,0,16,0" />
-                                        <DatePicker x:Name="StartDatePicker" Grid.Column="1" SelectedDateFormat="Long"
-                                                    SelectedDateChanged="DatePicker_SelectedDateChanged" />
-                                        <DatePicker x:Name="EndDatePicker" Grid.Column="3" SelectedDateFormat="Long"
-                                                    SelectedDateChanged="DatePicker_SelectedDateChanged" />
+                                        <TextBlock Text="统计月份" FontWeight="SemiBold" Margin="0,0,16,0" />
+                                        <ComboBox x:Name="OverviewYearComboBox" Grid.Column="1"
+                                                  ItemStringFormat="{}{0} 年"
+                                                  SelectionChanged="OverviewMonthComboBox_SelectionChanged" />
+                                        <ComboBox x:Name="OverviewMonthComboBox" Grid.Column="3"
+                                                  ItemStringFormat="{}{0:00} 月"
+                                                  SelectionChanged="OverviewMonthComboBox_SelectionChanged" />
                                         <StackPanel Grid.Column="4" Orientation="Horizontal" Margin="16,0,0,0">
                                             <Button x:Name="PreviousMonthButton" Content="上个月" Padding="13,7" Margin="0,0,8,0" Click="PreviousMonthButton_Click" />
                                             <Button x:Name="NextMonthButton" Content="下个月" Padding="13,7" Margin="0,0,8,0" Click="NextMonthButton_Click" />
@@ -145,10 +155,16 @@
                                     </StackPanel>
                                 </Border>
 
-                                <UniformGrid Columns="4" Margin="0,0,0,18">
-                                    <Border Style="{StaticResource GlassCardStyle}" Padding="18" Margin="0,0,12,0">
+                                <Grid Margin="0,0,0,18">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="9*" />
+                                        <ColumnDefinition Width="18.5*" />
+                                        <ColumnDefinition Width="6.25*" />
+                                        <ColumnDefinition Width="6.25*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0" Style="{StaticResource GlassCardStyle}" Padding="12" Margin="0,0,12,0">
                                         <StackPanel>
-                                            <TextBlock Text="区间加班" Style="{StaticResource MutedTextStyle}" />
+                                            <TextBlock Text="本月加班" Style="{StaticResource MutedTextStyle}" />
                                             <StackPanel Orientation="Horizontal" Margin="0,10,0,4">
                                                 <TextBlock x:Name="TotalHoursText" Text="0" FontSize="30" FontWeight="SemiBold" />
                                                 <TextBlock Text=" 小时" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Bottom" Margin="4,0,0,5" />
@@ -156,15 +172,27 @@
                                             <TextBlock x:Name="RangeText" Text="等待刷新" Style="{StaticResource MutedTextStyle}" />
                                         </StackPanel>
                                     </Border>
-                                    <Border Style="{StaticResource GlassCardStyle}" Padding="18" Margin="0,0,12,0">
+                                    <Border Grid.Column="1" Style="{StaticResource GlassCardStyle}" Padding="18" Margin="0,0,12,0">
                                         <StackPanel>
-                                            <TextBlock Text="预估加班费" Style="{StaticResource MutedTextStyle}" />
-                                            <TextBlock x:Name="TotalAmountText" Text="¥ 0.00" FontSize="30" FontWeight="SemiBold"
-                                                       Foreground="{StaticResource SuccessBrush}" Margin="0,10,0,4" />
-                                            <TextBlock Text="按当前费率配置计算" Style="{StaticResource MutedTextStyle}" />
+                                            <TextBlock Text="加班费预估" Style="{StaticResource MutedTextStyle}" />
+                                            <Grid Margin="0,9,0,4">
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                </Grid.RowDefinitions>
+                                                <TextBlock Text="预估到手 / 总加班费" FontSize="11" Foreground="{StaticResource MutedBrush}" />
+                                                <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,3,0,0">
+                                                    <TextBlock x:Name="TotalAmountText" Text="¥ 0.00" FontSize="25" FontWeight="SemiBold"
+                                                               Foreground="{StaticResource SuccessBrush}" />
+                                                    <TextBlock Text=" / " FontSize="23" FontWeight="SemiBold"
+                                                               Foreground="{StaticResource MutedBrush}" Margin="3,0" />
+                                                    <TextBlock x:Name="GrossOvertimePayText" Text="¥ 0.00" FontSize="25" FontWeight="SemiBold"
+                                                               Foreground="{StaticResource AccentBrush}" />
+                                                </StackPanel>
+                                            </Grid>
                                         </StackPanel>
                                     </Border>
-                                    <Border Style="{StaticResource GlassCardStyle}" Padding="18" Margin="0,0,12,0">
+                                    <Border Grid.Column="2" Style="{StaticResource GlassCardStyle}" Padding="12" Margin="0,0,12,0">
                                         <StackPanel>
                                             <TextBlock Text="加班日期数" Style="{StaticResource MutedTextStyle}" />
                                             <StackPanel Orientation="Horizontal" Margin="0,10,0,4">
@@ -174,7 +202,7 @@
                                             <TextBlock x:Name="AverageHoursText" Text="日均 0 小时" Style="{StaticResource MutedTextStyle}" />
                                         </StackPanel>
                                     </Border>
-                                    <Border Style="{StaticResource GlassCardStyle}" Padding="18">
+                                    <Border Grid.Column="3" Style="{StaticResource GlassCardStyle}" Padding="12">
                                         <StackPanel>
                                             <TextBlock Text="餐补次数" Style="{StaticResource MutedTextStyle}" />
                                             <StackPanel Orientation="Horizontal" Margin="0,10,0,4">
@@ -184,7 +212,7 @@
                                             <TextBlock x:Name="MealAllowanceAmountText" Text="餐补合计 ¥ 0.00" Style="{StaticResource MutedTextStyle}" />
                                         </StackPanel>
                                     </Border>
-                                </UniformGrid>
+                                </Grid>
 
                                 <Border Style="{StaticResource GlassCardStyle}" Padding="18">
                                     <Grid>
@@ -202,6 +230,7 @@
                                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                                                 <TextBlock Text="点击日期查看当天详情" VerticalAlignment="Center"
                                                            Style="{StaticResource MutedTextStyle}" Margin="0,0,12,0" />
+                                                <Button Content="导出本年" Padding="13,7" Margin="0,0,8,0" Click="ExportYearEvidenceButton_Click" />
                                                 <Button Content="导出本月" Padding="13,7" Click="ExportMonthEvidenceButton_Click" />
                                             </StackPanel>
                                         </Grid>
@@ -220,7 +249,7 @@
                                             </ItemsControl.ItemsPanel>
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate>
-                                                    <Border Margin="4" Padding="10,8" MinHeight="68" CornerRadius="11"
+                                                    <Border Margin="4" Padding="10,8" MinHeight="84" CornerRadius="11"
                                                             Cursor="Hand" MouseLeftButtonUp="CalendarDay_MouseLeftButtonUp">
                                                         <Border.Style>
                                                             <Style TargetType="Border">
@@ -249,7 +278,8 @@
                                                         <Grid>
                                                             <Grid.RowDefinitions>
                                                                 <RowDefinition Height="Auto" />
-                                                                <RowDefinition Height="*" />
+                                                                <RowDefinition Height="Auto" />
+                                                                <RowDefinition Height="Auto" />
                                                                 <RowDefinition Height="Auto" />
                                                             </Grid.RowDefinitions>
                                                             <Grid>
@@ -268,9 +298,22 @@
                                                                     </TextBlock.Style>
                                                                 </TextBlock>
                                                             </Grid>
-                                                            <TextBlock Grid.Row="1" Text="{Binding HoursText}" FontSize="12" FontWeight="SemiBold"
-                                                                       Foreground="{StaticResource AccentBrush}" Margin="0,5,0,2" />
-                                                            <TextBlock Grid.Row="2" Text="{Binding AmountText}" FontSize="11">
+                                                            <TextBlock Grid.Row="1" Text="{Binding LeaveText}" FontSize="11" FontWeight="SemiBold"
+                                                                       Margin="0,5,0,1" TextTrimming="CharacterEllipsis">
+                                                                <TextBlock.Style>
+                                                                    <Style TargetType="TextBlock">
+                                                                        <Setter Property="Foreground" Value="{StaticResource HolidayBrush}" />
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding HasPersonalLeave}" Value="True">
+                                                                                <Setter Property="Foreground" Value="{StaticResource DangerBrush}" />
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </TextBlock.Style>
+                                                            </TextBlock>
+                                                            <TextBlock Grid.Row="2" Text="{Binding HoursText}" FontSize="12" FontWeight="SemiBold"
+                                                                       Foreground="{StaticResource AccentBrush}" Margin="0,3,0,1" />
+                                                            <TextBlock Grid.Row="3" Text="{Binding AmountText}" FontSize="11">
                                                                 <TextBlock.Style>
                                                                     <Style TargetType="TextBlock">
                                                                         <Setter Property="Foreground" Value="{StaticResource SuccessBrush}" />
@@ -307,14 +350,14 @@
                                             Background="#76FFFFFF" BorderBrush="#306A819C" BorderThickness="1" CornerRadius="12">
                                         <StackPanel Orientation="Horizontal">
                                             <TextBlock Text="分析范围" FontWeight="SemiBold" Margin="0,0,10,0" />
-                                            <ComboBox x:Name="AnalyticsRangeModeComboBox" Width="138" SelectedIndex="1"
+                                            <ComboBox x:Name="AnalyticsRangeModeComboBox" Width="138" SelectedIndex="0"
                                                       SelectionChanged="AnalyticsRangeModeComboBox_SelectionChanged">
                                                 <ComboBoxItem Content="单个年度" />
                                                 <ComboBoxItem Content="近三年" />
                                                 <ComboBoxItem Content="近五年" />
                                                 <ComboBoxItem Content="近十年" />
                                             </ComboBox>
-                                            <ComboBox x:Name="AnalyticsYearComboBox" Width="108" Margin="10,0,0,0" IsEnabled="False"
+                                            <ComboBox x:Name="AnalyticsYearComboBox" Width="108" Margin="10,0,0,0" IsEnabled="True"
                                                       SelectionChanged="AnalyticsYearComboBox_SelectionChanged" />
                                         </StackPanel>
                                     </Border>
@@ -364,7 +407,8 @@
                                                 <Border Width="10" Height="10" CornerRadius="3" Background="{StaticResource SuccessBrush}" Margin="0,2,5,0" />
                                                 <TextBlock Text="餐补（次）· 双轴独立缩放" Style="{StaticResource MutedTextStyle}" />
                                             </StackPanel>
-                                            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                                            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
+                                                          PreviewMouseWheel="HorizontalChartScrollViewer_PreviewMouseWheel">
                                                 <ItemsControl x:Name="MonthlyPayMealChart">
                                                     <ItemsControl.ItemsPanel>
                                                         <ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate>
@@ -408,7 +452,8 @@
                                                 <Border Width="10" Height="10" CornerRadius="3" Background="{StaticResource HolidayBrush}" Margin="0,2,5,0" />
                                                 <TextBlock Text="节假日" Style="{StaticResource MutedTextStyle}" />
                                             </StackPanel>
-                                            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                                            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
+                                                          PreviewMouseWheel="HorizontalChartScrollViewer_PreviewMouseWheel">
                                                 <ItemsControl x:Name="MonthlyHoursChart">
                                                     <ItemsControl.ItemsPanel>
                                                         <ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate>
@@ -449,7 +494,7 @@
                                         </Grid.ColumnDefinitions>
                                         <StackPanel>
                                             <TextBlock Text="年度加班费" Style="{StaticResource SectionTitleStyle}" />
-                                            <TextBlock x:Name="YearPaySubtitleText" Text="近三年加班费规模对比"
+                                            <TextBlock x:Name="YearPaySubtitleText" Text="本年度加班费规模"
                                                        Style="{StaticResource MutedTextStyle}" Margin="0,5,0,12" />
                                             <ItemsControl x:Name="YearPayChart">
                                                 <ItemsControl.ItemTemplate>
@@ -551,11 +596,13 @@
                                                                     ElementStyle="{StaticResource CenteredDataGridTextStyle}" />
                                                 <DataGridTextColumn Header="延时抵扣" Binding="{Binding DelayDeductedDurationText}" Width="100"
                                                                     ElementStyle="{StaticResource CenteredDataGridTextStyle}" />
-                                                <DataGridTextColumn Header="请假抵扣" Binding="{Binding LeaveDeductedDurationText}" Width="100"
+                                                <DataGridTextColumn Header="请假" Binding="{Binding LeaveSummaryText}" Width="155"
+                                                                    ElementStyle="{StaticResource CenteredDataGridTextStyle}" />
+                                                <DataGridTextColumn Header="月度事假抵扣" Binding="{Binding LeaveDeductedDurationText}" Width="125"
                                                                     ElementStyle="{StaticResource CenteredDataGridTextStyle}" />
                                                 <DataGridTextColumn Header="实算加班" Binding="{Binding HoursDurationText}" Width="100"
                                                                     ElementStyle="{StaticResource CenteredDataGridTextStyle}" />
-                                                <DataGridTextColumn Header="加班费" Binding="{Binding OvertimePay, StringFormat=¥ {0:N2}}" Width="105">
+                                                <DataGridTextColumn Header="加班费" Binding="{Binding GrossOvertimePay, StringFormat=¥ {0:N2}}" Width="105">
                                                     <DataGridTextColumn.ElementStyle>
                                                         <Style TargetType="TextBlock" BasedOn="{StaticResource CenteredDataGridTextStyle}">
                                                             <Style.Triggers>
@@ -569,7 +616,7 @@
                                                 </DataGridTextColumn>
                                                 <DataGridTextColumn Header="餐补" Binding="{Binding MealAllowance, StringFormat=¥ {0:N2}}" Width="90"
                                                                     ElementStyle="{StaticResource CenteredDataGridTextStyle}" />
-                                                <DataGridTextColumn Header="合计" Binding="{Binding Amount, StringFormat=¥ {0:N2}}" Width="105"
+                                                <DataGridTextColumn Header="合计" Binding="{Binding GrossAmount, StringFormat=¥ {0:N2}}" Width="105"
                                                                     ElementStyle="{StaticResource CenteredDataGridTextStyle}" />
                                             </DataGrid.Columns>
                                         </DataGrid>
@@ -585,8 +632,9 @@
                                                 <DataGridTextColumn Header="节假日(h)" Binding="{Binding HolidayHours, StringFormat=0.##}" Width="120" />
                                                 <DataGridTextColumn Header="合计(h)" Binding="{Binding TotalHours, StringFormat=0.##}" Width="110" />
                                                 <DataGridTextColumn Header="延时抵扣(h)" Binding="{Binding DelayDeductedHours, StringFormat=0.##}" Width="110" />
-                                                <DataGridTextColumn Header="请假(h)" Binding="{Binding LeaveHours, StringFormat=0.##}" Width="100" />
-                                                <DataGridTextColumn Header="已抵扣(h)" Binding="{Binding LeaveDeductedHours, StringFormat=0.##}" Width="105" />
+                                                <DataGridTextColumn Header="事假(h)" Binding="{Binding PersonalLeaveHours, StringFormat=0.##}" Width="95" />
+                                                <DataGridTextColumn Header="年假(h)" Binding="{Binding AnnualLeaveHours, StringFormat=0.##}" Width="95" />
+                                                <DataGridTextColumn Header="事假抵扣(h)" Binding="{Binding LeaveDeductedHours, StringFormat=0.##}" Width="110" />
                                                 <DataGridTextColumn Header="加班费" Binding="{Binding OvertimePay, StringFormat=¥ {0:N2}}" Width="115" />
                                                 <DataGridTextColumn Header="餐补次数" Binding="{Binding MealAllowanceCount}" Width="100" />
                                                 <DataGridTextColumn Header="餐补" Binding="{Binding MealAllowance, StringFormat=¥ {0:N2}}" Width="100" />
@@ -605,8 +653,9 @@
                                                 <DataGridTextColumn Header="节假日(h)" Binding="{Binding HolidayHours, StringFormat=0.##}" Width="130" />
                                                 <DataGridTextColumn Header="合计(h)" Binding="{Binding TotalHours, StringFormat=0.##}" Width="120" />
                                                 <DataGridTextColumn Header="延时抵扣(h)" Binding="{Binding DelayDeductedHours, StringFormat=0.##}" Width="115" />
-                                                <DataGridTextColumn Header="请假(h)" Binding="{Binding LeaveHours, StringFormat=0.##}" Width="105" />
-                                                <DataGridTextColumn Header="已抵扣(h)" Binding="{Binding LeaveDeductedHours, StringFormat=0.##}" Width="110" />
+                                                <DataGridTextColumn Header="事假(h)" Binding="{Binding PersonalLeaveHours, StringFormat=0.##}" Width="100" />
+                                                <DataGridTextColumn Header="年假(h)" Binding="{Binding AnnualLeaveHours, StringFormat=0.##}" Width="100" />
+                                                <DataGridTextColumn Header="事假抵扣(h)" Binding="{Binding LeaveDeductedHours, StringFormat=0.##}" Width="115" />
                                                 <DataGridTextColumn Header="加班费" Binding="{Binding OvertimePay, StringFormat=¥ {0:N2}}" Width="120" />
                                                 <DataGridTextColumn Header="餐补次数" Binding="{Binding MealAllowanceCount}" Width="105" />
                                                 <DataGridTextColumn Header="餐补" Binding="{Binding MealAllowance, StringFormat=¥ {0:N2}}" Width="105" />
@@ -629,7 +678,7 @@
                             <Grid>
                                 <StackPanel>
                                     <TextBlock Text="节假日日历" Style="{StaticResource PageTitleStyle}" />
-                                    <TextBlock Text="法定节假日和调休工作日会覆盖普通周末判断。" Style="{StaticResource MutedTextStyle}" Margin="0,7,0,18" />
+                                    <TextBlock Text="仅法定节假日当天按节假日费率，其余假期休息日按周末、调休上班日按工作日。" Style="{StaticResource MutedTextStyle}" Margin="0,7,0,18" />
                                 </StackPanel>
                                 <Button x:Name="SyncHolidayButton" Content="立即同步" HorizontalAlignment="Right" VerticalAlignment="Top"
                                         Style="{StaticResource AccentButtonStyle}" Click="SyncHolidayButton_Click" />
@@ -653,7 +702,7 @@
                                     <DataGrid.Columns>
                                         <DataGridTextColumn Header="日期" Binding="{Binding DateText}" Width="180" />
                                         <DataGridTextColumn Header="名称" Binding="{Binding Name}" Width="*" />
-                                        <DataGridTextColumn Header="类型" Binding="{Binding TypeText}" Width="180" />
+                                        <DataGridTextColumn Header="类型" Binding="{Binding TypeText}" Width="210" />
                                     </DataGrid.Columns>
                                 </DataGrid>
                             </Border>
@@ -682,10 +731,9 @@
                                 <Border Style="{StaticResource GlassCardStyle}" Padding="22" Margin="0,0,0,16">
                                     <StackPanel>
                                         <TextBlock Text="工时计算规则" Style="{StaticResource SectionTitleStyle}" Margin="0,0,0,16" />
-                                        <UniformGrid Columns="4" Margin="0,0,0,15">
+                                        <UniformGrid Columns="3" Margin="0,0,0,15">
                                             <StackPanel Margin="0,0,14,0"><TextBlock Text="最早上班（HH:mm）" Margin="0,0,0,7" /><TextBox x:Name="FlexibleStartEarliestTextBox" /></StackPanel>
                                             <StackPanel Margin="0,0,14,0"><TextBlock Text="最晚上班（HH:mm）" Margin="0,0,0,7" /><TextBox x:Name="FlexibleStartLatestTextBox" /></StackPanel>
-                                            <StackPanel Margin="0,0,14,0"><TextBlock Text="标准在岗跨度（小时）" Margin="0,0,0,7" /><TextBox x:Name="StandardWorkSpanTextBox" /></StackPanel>
                                             <StackPanel><TextBlock Text="工作日起算（HH:mm）" Margin="0,0,0,7" /><TextBox x:Name="WorkdayStartTextBox" /></StackPanel>
                                         </UniformGrid>
                                         <UniformGrid Columns="4" Margin="0,0,0,14">
@@ -695,8 +743,8 @@
                                             <StackPanel><TextBlock Text="周末 / 节假日餐补门槛" Margin="0,0,0,7" /><TextBox x:Name="NonWorkdayMealHoursTextBox" /></StackPanel>
                                         </UniformGrid>
                                         <StackPanel Orientation="Horizontal">
-                                            <CheckBox x:Name="DeductLeaveCheckBox" Content="从当月加班中抵扣 QHR 请假 / 缺勤时数" Margin="0,0,28,0" />
-                                            <TextBlock Text="周末和节假日按首末卡直算，不扣休息" Style="{StaticResource MutedTextStyle}" VerticalAlignment="Center" />
+                                            <CheckBox x:Name="DeductLeaveCheckBox" Content="事假按月抵扣加班（年假不抵扣）" Margin="0,0,28,0" />
+                                            <TextBlock Text="净加班可为负数；加班费最低为 0 元" Style="{StaticResource MutedTextStyle}" VerticalAlignment="Center" />
                                         </StackPanel>
                                     </StackPanel>
                                 </Border>
@@ -710,14 +758,27 @@
                                     </StackPanel>
                                 </Border>
 
-                                <Border Style="{StaticResource GlassCardStyle}" Padding="22">
-                                    <StackPanel>
-                                        <TextBlock Text="软件更新" Style="{StaticResource SectionTitleStyle}" Margin="0,0,0,6" />
-                                        <TextBlock x:Name="SettingsVersionText" Text="当前版本 v1.2"
-                                                   Style="{StaticResource MutedTextStyle}" Margin="0,0,0,14" />
-                                        <TextBlock Text="远程 update.json 地址（可选；留空时检查程序目录中的清单）" Margin="0,0,0,7" />
-                                        <TextBox x:Name="UpdateManifestUrlTextBox" />
-                                    </StackPanel>
+                                <Border Style="{StaticResource GlassCardStyle}" Padding="22" Margin="0,0,0,16">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="数据备份与迁移" Style="{StaticResource SectionTitleStyle}" />
+                                            <TextBlock Text="将考勤、计算设置、目标、消费、每日备注和证据图片备份到一个密码加密文件，换电脑后可重新导入。"
+                                                       Style="{StaticResource MutedTextStyle}" Margin="0,7,0,0" TextWrapping="Wrap" />
+                                            <TextBlock Text="SSO 登录密码不会进入备份；导入冲突时由你确认使用本机数据还是备份数据。"
+                                                       Style="{StaticResource MutedTextStyle}" Margin="0,4,0,0" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right"
+                                                    VerticalAlignment="Center" Margin="25,0,0,0">
+                                            <Button Content="备份全部数据" Padding="16,8" Margin="0,0,9,0"
+                                                    Click="BackupAllDataMenuItem_Click" />
+                                            <Button Content="导入备份" Padding="16,8" Style="{StaticResource AccentButtonStyle}"
+                                                    Click="ImportBackupMenuItem_Click" />
+                                        </StackPanel>
+                                    </Grid>
                                 </Border>
 
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
@@ -790,6 +851,61 @@
                                     </Grid>
                                 </Border>
 
+                                <Border x:Name="CompletedGoalsBorder" Visibility="Collapsed"
+                                        Style="{StaticResource GlassCardStyle}" Padding="22" Margin="0,0,0,16">
+                                    <StackPanel>
+                                        <Grid>
+                                            <StackPanel>
+                                                <TextBlock Text="历史已完成目标" Style="{StaticResource SectionTitleStyle}" />
+                                                <TextBlock x:Name="CompletedGoalsSummaryText" Text="达成的目标会自动归档到这里"
+                                                           Style="{StaticResource MutedTextStyle}" Margin="0,5,0,0" />
+                                            </StackPanel>
+                                            <Border HorizontalAlignment="Right" VerticalAlignment="Center" Padding="12,6"
+                                                    CornerRadius="12" Background="#16199C6C">
+                                                <TextBlock Text="✓ 已完成" Foreground="{StaticResource SuccessBrush}" FontWeight="SemiBold" />
+                                            </Border>
+                                        </Grid>
+                                        <ItemsControl x:Name="CompletedGoalsItemsControl" Margin="0,16,0,0">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border Background="#52FFFFFF" BorderBrush="{StaticResource LineBrush}"
+                                                            BorderThickness="1" CornerRadius="13" Padding="17" Margin="0,0,0,10">
+                                                        <StackPanel>
+                                                            <Grid>
+                                                                <StackPanel>
+                                                                    <TextBlock Text="{Binding GoalName}" FontSize="17" FontWeight="SemiBold" />
+                                                                    <TextBlock Text="{Binding DateRangeText}" Style="{StaticResource MutedTextStyle}" Margin="0,4,0,0" />
+                                                                </StackPanel>
+                                                                <StackPanel HorizontalAlignment="Right">
+                                                                    <TextBlock Text="{Binding CompletedDateText}" HorizontalAlignment="Right"
+                                                                               Foreground="{StaticResource SuccessBrush}" FontWeight="SemiBold" />
+                                                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+                                                                        <Button Content="修改" Padding="10,3" Margin="0,0,7,0"
+                                                                                Click="EditCompletedGoalButton_Click" />
+                                                                        <Button Content="设为当前目标" Padding="10,3"
+                                                                                Foreground="{StaticResource AccentBrush}"
+                                                                                Click="RestoreCompletedGoalButton_Click" />
+                                                                    </StackPanel>
+                                                                </StackPanel>
+                                                            </Grid>
+                                                            <UniformGrid Columns="6" Margin="0,15,0,0">
+                                                                <StackPanel><TextBlock Text="目标价格" Style="{StaticResource MutedTextStyle}" /><TextBlock Text="{Binding TargetAmountText}" FontWeight="SemiBold" Margin="0,4,0,0" /></StackPanel>
+                                                                <StackPanel><TextBlock Text="完成时长" Style="{StaticResource MutedTextStyle}" /><TextBlock Text="{Binding DurationText}" FontWeight="SemiBold" Margin="0,4,0,0" /></StackPanel>
+                                                                <StackPanel><TextBlock Text="加班时长" Style="{StaticResource MutedTextStyle}" /><TextBlock Text="{Binding OvertimeHoursText}" FontWeight="SemiBold" Margin="0,4,0,0" /></StackPanel>
+                                                                <StackPanel><TextBlock Text="加班日期" Style="{StaticResource MutedTextStyle}" /><TextBlock Text="{Binding OvertimeDaysText}" FontWeight="SemiBold" Margin="0,4,0,0" /></StackPanel>
+                                                                <StackPanel><TextBlock Text="累计收入" Style="{StaticResource MutedTextStyle}" /><TextBlock Text="{Binding EarnedAmountText}" Foreground="{StaticResource AccentBrush}" FontWeight="SemiBold" Margin="0,4,0,0" /></StackPanel>
+                                                                <StackPanel><TextBlock Text="期间消费" Style="{StaticResource MutedTextStyle}" /><TextBlock Text="{Binding ExpenseAmountText}" Foreground="{StaticResource DangerBrush}" FontWeight="SemiBold" Margin="0,4,0,0" /></StackPanel>
+                                                            </UniformGrid>
+                                                            <TextBlock Text="{Binding OvertimeCompositionText}" Style="{StaticResource MutedTextStyle}" Margin="0,13,0,0" />
+                                                            <TextBlock Text="{Binding IncomeDetailText}" Style="{StaticResource MutedTextStyle}" Margin="0,4,0,0" />
+                                                        </StackPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </Border>
+
                                 <Border Style="{StaticResource GlassCardStyle}" Padding="22" Margin="0,0,0,16">
                                     <StackPanel>
                                         <TextBlock Text="目标设置" Style="{StaticResource SectionTitleStyle}" Margin="0,0,0,16" />
@@ -823,8 +939,13 @@
                                                     <ComboBoxItem Content="加班费 + 餐补" />
                                                 </ComboBox>
                                             </StackPanel>
-                                            <Button Grid.Column="7" Content="保存目标" Style="{StaticResource AccentButtonStyle}"
-                                                    Margin="16,25,0,0" Click="SaveGoalButton_Click" />
+                                            <StackPanel Grid.Column="7" Orientation="Horizontal" Margin="16,25,0,0">
+                                                <Button Content="保存目标" Style="{StaticResource AccentButtonStyle}"
+                                                        Click="SaveGoalButton_Click" />
+                                                <Button x:Name="DeleteCurrentGoalButton" Content="删除当前目标"
+                                                        Margin="8,0,0,0" Foreground="{StaticResource DangerBrush}"
+                                                        Click="DeleteCurrentGoalButton_Click" />
+                                            </StackPanel>
                                         </Grid>
                                         <TextBlock x:Name="GoalStatusText" Style="{StaticResource MutedTextStyle}" Margin="0,12,0,0" />
                                     </StackPanel>
@@ -835,48 +956,85 @@
                                         <Grid.RowDefinitions>
                                             <RowDefinition Height="Auto" />
                                             <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="260" />
+                                            <RowDefinition Height="Auto" />
                                         </Grid.RowDefinitions>
-                                        <TextBlock Text="消费记录" Style="{StaticResource SectionTitleStyle}" />
-                                        <Grid Grid.Row="1" Margin="0,15,0,14">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="170" />
-                                                <ColumnDefinition Width="16" />
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="16" />
-                                                <ColumnDefinition Width="180" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <DatePicker x:Name="ExpenseDatePicker" />
-                                            <TextBox x:Name="ExpenseDescriptionTextBox" Grid.Column="2" ToolTip="消费说明" />
-                                            <TextBox x:Name="ExpenseAmountTextBox" Grid.Column="4" ToolTip="消费金额（元）" />
-                                            <Button Grid.Column="5" Content="添加消费" Margin="14,0,0,0" Click="AddExpenseButton_Click" />
+                                        <Grid>
+                                            <StackPanel>
+                                                <TextBlock Text="月度消费账本" Style="{StaticResource SectionTitleStyle}" />
+                                                <TextBlock x:Name="ExpenseCalendarMonthSummaryText" Text="本月暂无消费"
+                                                           Style="{StaticResource MutedTextStyle}" Margin="0,5,0,0" />
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                                <TextBlock Text="点击日期记一笔" Style="{StaticResource MutedTextStyle}"
+                                                           VerticalAlignment="Center" Margin="0,0,12,0" />
+                                                <Button Content="上个月" Padding="13,7" Margin="0,0,8,0"
+                                                        Click="PreviousExpenseMonthButton_Click" />
+                                                <Button x:Name="NextExpenseMonthButton" Content="下个月" Padding="13,7" Margin="0,0,8,0"
+                                                        Click="NextExpenseMonthButton_Click" />
+                                                <Button Content="本月" Padding="13,7" Click="CurrentExpenseMonthButton_Click" />
+                                            </StackPanel>
                                         </Grid>
-                                        <DataGrid x:Name="GoalExpensesDataGrid" Grid.Row="2" AutoGenerateColumns="False">
-                                            <DataGrid.ColumnHeaderStyle>
-                                                <Style TargetType="DataGridColumnHeader" BasedOn="{StaticResource {x:Type DataGridColumnHeader}}">
-                                                    <Setter Property="HorizontalContentAlignment" Value="Center" />
-                                                </Style>
-                                            </DataGrid.ColumnHeaderStyle>
-                                            <DataGrid.Columns>
-                                                <DataGridTextColumn Header="日期" Binding="{Binding DateText}" Width="160"
-                                                                    ElementStyle="{StaticResource CenteredDataGridTextStyle}" />
-                                                <DataGridTextColumn Header="说明" Binding="{Binding Description}" Width="*"
-                                                                    ElementStyle="{StaticResource CenteredDataGridTextStyle}" />
-                                                <DataGridTextColumn Header="金额" Binding="{Binding Amount, StringFormat=¥ {0:N2}}" Width="180"
-                                                                    ElementStyle="{StaticResource CenteredDataGridTextStyle}" />
-                                                <DataGridTemplateColumn Header="操作" Width="110">
-                                                    <DataGridTemplateColumn.CellTemplate>
-                                                        <DataTemplate>
-                                                            <Button Content="删除" Padding="10,5" Foreground="{StaticResource DangerBrush}"
-                                                                    HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                                    Background="Transparent" BorderThickness="0" Effect="{x:Null}"
-                                                                    Click="DeleteExpenseButton_Click" />
-                                                        </DataTemplate>
-                                                    </DataGridTemplateColumn.CellTemplate>
-                                                </DataGridTemplateColumn>
-                                            </DataGrid.Columns>
-                                        </DataGrid>
+                                        <UniformGrid Grid.Row="1" Columns="7" Margin="0,15,0,7">
+                                            <TextBlock Text="周一" HorizontalAlignment="Center" Foreground="{StaticResource MutedBrush}" />
+                                            <TextBlock Text="周二" HorizontalAlignment="Center" Foreground="{StaticResource MutedBrush}" />
+                                            <TextBlock Text="周三" HorizontalAlignment="Center" Foreground="{StaticResource MutedBrush}" />
+                                            <TextBlock Text="周四" HorizontalAlignment="Center" Foreground="{StaticResource MutedBrush}" />
+                                            <TextBlock Text="周五" HorizontalAlignment="Center" Foreground="{StaticResource MutedBrush}" />
+                                            <TextBlock Text="周六" HorizontalAlignment="Center" Foreground="{StaticResource MutedBrush}" />
+                                            <TextBlock Text="周日" HorizontalAlignment="Center" Foreground="{StaticResource MutedBrush}" />
+                                        </UniformGrid>
+                                        <ItemsControl x:Name="ExpenseCalendar" Grid.Row="2">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate><UniformGrid Columns="7" /></ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border Margin="4" Padding="11,9" MinHeight="82" CornerRadius="11"
+                                                            Cursor="Hand" MouseLeftButtonUp="ExpenseCalendarDay_MouseLeftButtonUp">
+                                                        <Border.Style>
+                                                            <Style TargetType="Border">
+                                                                <Setter Property="Background" Value="#64FFFFFF" />
+                                                                <Setter Property="BorderBrush" Value="#306A819C" />
+                                                                <Setter Property="BorderThickness" Value="1" />
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding IsBlank}" Value="True">
+                                                                        <Setter Property="Background" Value="Transparent" />
+                                                                        <Setter Property="BorderBrush" Value="Transparent" />
+                                                                        <Setter Property="BorderThickness" Value="0" />
+                                                                        <Setter Property="IsHitTestVisible" Value="False" />
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding HasExpense}" Value="True">
+                                                                        <Setter Property="Background" Value="#17E45C78" />
+                                                                        <Setter Property="BorderBrush" Value="#52E45C78" />
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding IsToday}" Value="True">
+                                                                        <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                                                                        <Setter Property="BorderThickness" Value="2" />
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding IsFuture}" Value="True">
+                                                                        <Setter Property="Opacity" Value="0.43" />
+                                                                        <Setter Property="Cursor" Value="Arrow" />
+                                                                        <Setter Property="IsHitTestVisible" Value="False" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </Border.Style>
+                                                        <Grid>
+                                                            <Grid.RowDefinitions>
+                                                                <RowDefinition Height="Auto" />
+                                                                <RowDefinition Height="*" />
+                                                                <RowDefinition Height="Auto" />
+                                                            </Grid.RowDefinitions>
+                                                            <TextBlock Text="{Binding DayText}" FontSize="15" FontWeight="SemiBold" />
+                                                            <TextBlock Grid.Row="1" Text="{Binding AmountText}" FontSize="12" FontWeight="SemiBold"
+                                                                       Foreground="{StaticResource DangerBrush}" Margin="0,8,0,2" />
+                                                            <TextBlock Grid.Row="2" Text="{Binding CountText}" FontSize="11"
+                                                                       Foreground="{StaticResource MutedBrush}" />
+                                                        </Grid>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
                                     </Grid>
                                 </Border>
                             </StackPanel>
@@ -931,8 +1089,9 @@
                                 <TextBlock x:Name="DayDetailGrossText" Grid.Column="1" Text="0h00m" FontWeight="SemiBold" Margin="0,4" />
                                 <TextBlock Grid.Row="1" Text="延时工时抵扣" Margin="0,4" />
                                 <TextBlock x:Name="DayDetailDelayText" Grid.Row="1" Grid.Column="1" Text="0h00m" FontWeight="SemiBold" Margin="0,4" />
-                                <TextBlock Grid.Row="2" Text="请假" Margin="0,4" />
-                                <TextBlock x:Name="DayDetailLeaveText" Grid.Row="2" Grid.Column="1" Text="0h00m" FontWeight="SemiBold" Margin="0,4" />
+                                <TextBlock Grid.Row="2" Text="请假 / 月度抵扣" Margin="0,4" />
+                                <TextBlock x:Name="DayDetailLeaveText" Grid.Row="2" Grid.Column="1" Text="无" FontWeight="SemiBold"
+                                           Margin="22,4,0,4" TextAlignment="Right" TextWrapping="Wrap" />
                             </Grid>
                         </Border>
 
@@ -1012,6 +1171,301 @@
                     </Grid>
                     </ScrollViewer>
                 </Border>
+            </Border>
+
+            <Border x:Name="ExpenseDetailOverlay" Grid.Row="1" Panel.ZIndex="120" Visibility="Collapsed"
+                    Background="#8A0C1726" IsHitTestVisible="True">
+                <Border Width="760" MaxHeight="780" Padding="26" HorizontalAlignment="Center" VerticalAlignment="Center"
+                        Style="{StaticResource GlassCardStyle}">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel Margin="0,0,5,0">
+                            <Grid>
+                                <StackPanel>
+                                    <TextBlock x:Name="ExpenseDetailTitleText" Text="当天消费" FontSize="22" FontWeight="SemiBold" />
+                                    <TextBlock x:Name="ExpenseDetailSummaryText" Text="暂无消费记录"
+                                               Style="{StaticResource MutedTextStyle}" Margin="0,6,0,0" />
+                                </StackPanel>
+                                <Button Content="×" Width="34" Height="34" Padding="0" HorizontalAlignment="Right"
+                                        VerticalAlignment="Top" Background="Transparent" BorderThickness="0" Effect="{x:Null}"
+                                        FontSize="22" Click="CloseExpenseDetailButton_Click" />
+                            </Grid>
+
+                            <Border Background="#42FFFFFF" BorderBrush="{StaticResource LineBrush}"
+                                    BorderThickness="1" CornerRadius="12" Padding="16" Margin="0,20,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="当天账单" FontSize="16" FontWeight="SemiBold" />
+                                    <Grid Margin="0,12,0,0">
+                                        <TextBlock x:Name="ExpenseDayEmptyText" Text="当天还没有消费，记下第一笔吧"
+                                                   Style="{StaticResource MutedTextStyle}" Margin="2,5,0,6" />
+                                        <ItemsControl x:Name="ExpenseDayItemsControl">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border Background="#52FFFFFF" BorderBrush="#246E819C" BorderThickness="1"
+                                                            CornerRadius="9" Padding="13,10" Margin="0,0,0,8">
+                                                        <Grid>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="*" />
+                                                                <ColumnDefinition Width="Auto" />
+                                                                <ColumnDefinition Width="Auto" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <TextBlock Text="{Binding Description}" VerticalAlignment="Center"
+                                                                       FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                            <TextBlock Grid.Column="1" Text="{Binding Amount, StringFormat=¥ {0:N2}}"
+                                                                       Foreground="{StaticResource DangerBrush}" FontWeight="SemiBold"
+                                                                       VerticalAlignment="Center" Margin="20,0,16,0" />
+                                                            <StackPanel Grid.Column="2" Orientation="Horizontal">
+                                                                <Button Content="修改" Padding="8,3" Margin="0,0,4,0"
+                                                                        Foreground="{StaticResource AccentBrush}" Background="Transparent"
+                                                                        BorderThickness="0" Effect="{x:Null}" Click="EditExpenseButton_Click" />
+                                                                <Button Content="删除" Padding="8,3"
+                                                                        Foreground="{StaticResource DangerBrush}" Background="Transparent"
+                                                                        BorderThickness="0" Effect="{x:Null}" Click="DeleteExpenseButton_Click" />
+                                                            </StackPanel>
+                                                        </Grid>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Background="#42FFFFFF" BorderBrush="{StaticResource LineBrush}"
+                                    BorderThickness="1" CornerRadius="12" Padding="16" Margin="0,14,0,0">
+                                <StackPanel>
+                                    <TextBlock x:Name="ExpenseEntryTitleText" Text="记一笔消费" FontSize="16" FontWeight="SemiBold" />
+                                    <Grid Margin="0,14,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="16" />
+                                            <ColumnDefinition Width="180" />
+                                            <ColumnDefinition Width="16" />
+                                            <ColumnDefinition Width="220" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="消费说明" Margin="0,0,0,7" />
+                                            <TextBox x:Name="ExpenseDescriptionTextBox" MaxLength="100"
+                                                     ToolTip="例如：午餐、交通、日用品" />
+                                            <TextBlock Text="写清买了什么，之后查账更方便" Style="{StaticResource MutedTextStyle}"
+                                                       FontSize="11" Margin="2,5,0,0" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2">
+                                            <TextBlock Text="消费日期" Margin="0,0,0,7" />
+                                            <DatePicker x:Name="ExpenseDatePicker" />
+                                            <TextBlock Text="可修正填错的日期" Style="{StaticResource MutedTextStyle}"
+                                                       FontSize="11" Margin="2,5,0,0" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="4">
+                                            <TextBlock Text="消费金额（元）" Margin="0,0,0,7" />
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBox x:Name="ExpenseAmountTextBox" MaxLength="15" VerticalContentAlignment="Center"
+                                                         PreviewTextInput="ExpenseAmountTextBox_PreviewTextInput"
+                                                         DataObject.Pasting="ExpenseAmountTextBox_Pasting"
+                                                         ToolTip="只允许输入数字，最多两位小数" />
+                                                <Button Grid.Column="1" Width="42" Height="38" Padding="0" Margin="8,0,0,0"
+                                                        ToolTip="打开金额计算器" AutomationProperties.Name="打开金额计算器"
+                                                        Click="ToggleExpenseCalculatorButton_Click">
+                                                    <Viewbox Width="20" Height="24" Stretch="Uniform">
+                                                        <Grid Width="18" Height="22">
+                                                            <Border Background="#FF4C5868" BorderBrush="#FF354151"
+                                                                    BorderThickness="1" CornerRadius="2" />
+                                                            <Border Margin="2.5,2.5,2.5,12.5" Background="#FF72D2EE"
+                                                                    CornerRadius="0.8" />
+                                                            <UniformGrid Rows="3" Columns="3" Margin="2.2,10.2,2.2,2.2">
+                                                                <Border Margin="0.7" Background="#FFD7DEE6" CornerRadius="0.5" />
+                                                                <Border Margin="0.7" Background="#FFD7DEE6" CornerRadius="0.5" />
+                                                                <Border Margin="0.7" Background="#FFD7DEE6" CornerRadius="0.5" />
+                                                                <Border Margin="0.7" Background="#FFD7DEE6" CornerRadius="0.5" />
+                                                                <Border Margin="0.7" Background="#FFD7DEE6" CornerRadius="0.5" />
+                                                                <Border Margin="0.7" Background="#FFD7DEE6" CornerRadius="0.5" />
+                                                                <Border Margin="0.7" Background="#FFD7DEE6" CornerRadius="0.5" />
+                                                                <Border Margin="0.7" Background="#FFD7DEE6" CornerRadius="0.5" />
+                                                                <Border Margin="0.7" Background="#FF3984D7" CornerRadius="0.5" />
+                                                            </UniformGrid>
+                                                        </Grid>
+                                                    </Viewbox>
+                                                </Button>
+                                            </Grid>
+                                            <TextBlock Text="仅支持非负数字，最多两位小数" Style="{StaticResource MutedTextStyle}"
+                                                       FontSize="11" Margin="2,5,0,0" />
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <Border x:Name="ExpenseCalculatorPanel" Visibility="Collapsed" Margin="0,14,0,0"
+                                            Background="#461473E6" BorderBrush="#421473E6" BorderThickness="1"
+                                            CornerRadius="11" Padding="12">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="220" />
+                                                <ColumnDefinition Width="14" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="金额计算器" FontWeight="SemiBold" />
+                                                <TextBox x:Name="ExpenseCalculatorDisplayTextBox" Text="0" IsReadOnly="True"
+                                                         FontSize="24" FontWeight="SemiBold" TextAlignment="Right"
+                                                         Margin="0,10,0,0" Padding="10,7" />
+                                                <TextBlock Text="计算完成后点“使用”回填金额" Style="{StaticResource MutedTextStyle}"
+                                                           FontSize="11" Margin="2,7,0,0" TextWrapping="Wrap" />
+                                            </StackPanel>
+                                            <UniformGrid Grid.Column="2" Columns="4">
+                                                <Button Content="C" Tag="clear" Margin="3" Height="38" Click="ExpenseCalculatorButton_Click" />
+                                                <Button Content="⌫" Tag="back" Margin="3" Height="38" Click="ExpenseCalculatorButton_Click" />
+                                                <Button Content="÷" Tag="/" Margin="3" Height="38" Click="ExpenseCalculatorButton_Click" />
+                                                <Button Content="×" Tag="*" Margin="3" Height="38" Click="ExpenseCalculatorButton_Click" />
+                                                <Button Content="7" Tag="7" Margin="3" Height="38" Click="ExpenseCalculatorButton_Click" />
+                                                <Button Content="8" Tag="8" Margin="3" Height="38" Click="ExpenseCalculatorButton_Click" />
+                                                <Button Content="9" Tag="9" Margin="3" Height="38" Click="ExpenseCalculatorButton_Click" />
+                                                <Button Content="−" Tag="-" Margin="3" Height="38" Click="ExpenseCalculatorButton_Click" />
+                                                <Button Content="4" Tag="4" Margin="3" Height="38" Click="ExpenseCalculatorButton_Click" />
+                                                <Button Content="5" Tag="5" Margin="3" Height="38" Click="ExpenseCalculatorButton_Click" />
+                                                <Button Content="6" Tag="6" Margin="3" Height="38" Click="ExpenseCalculatorButton_Click" />
+                                                <Button Content="+" Tag="+" Margin="3" Height="38" Click="ExpenseCalculatorButton_Click" />
+                                                <Button Content="1" Tag="1" Margin="3" Height="38" Click="ExpenseCalculatorButton_Click" />
+                                                <Button Content="2" Tag="2" Margin="3" Height="38" Click="ExpenseCalculatorButton_Click" />
+                                                <Button Content="3" Tag="3" Margin="3" Height="38" Click="ExpenseCalculatorButton_Click" />
+                                                <Button Content="=" Tag="=" Margin="3" Height="38" Click="ExpenseCalculatorButton_Click" />
+                                                <Button Content="0" Tag="0" Margin="3" Height="38" Click="ExpenseCalculatorButton_Click" />
+                                                <Button Content="." Tag="." Margin="3" Height="38" Click="ExpenseCalculatorButton_Click" />
+                                                <Button Content="关闭" Tag="cancel" Margin="3" Height="38" Click="ExpenseCalculatorButton_Click" />
+                                                <Button Content="使用" Tag="use" Margin="3" Height="38" Style="{StaticResource AccentButtonStyle}"
+                                                        Click="ExpenseCalculatorButton_Click" />
+                                            </UniformGrid>
+                                        </Grid>
+                                    </Border>
+
+                                    <Grid Margin="0,15,0,0">
+                                        <TextBlock x:Name="ExpenseEntryStatusText" Text="日期由当前打开的日历格确定"
+                                                   Style="{StaticResource MutedTextStyle}" VerticalAlignment="Center" />
+                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                            <Button x:Name="CancelExpenseEditButton" Content="取消修改" Padding="16,8" Margin="0,0,8,0"
+                                                    Visibility="Collapsed" Click="CancelExpenseEditButton_Click" />
+                                            <Button x:Name="SaveExpenseButton" Content="保存这笔消费" Style="{StaticResource AccentButtonStyle}" Padding="18,8"
+                                                    Click="AddExpenseButton_Click" />
+                                        </StackPanel>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Border>
+            </Border>
+
+            <Border x:Name="CompletedGoalEditOverlay" Grid.Row="1" Panel.ZIndex="130" Visibility="Collapsed"
+                    Background="#8A0C1726" IsHitTestVisible="True">
+                <Border Width="720" Padding="28" HorizontalAlignment="Center" VerticalAlignment="Center"
+                        Style="{StaticResource GlassCardStyle}">
+                    <StackPanel>
+                        <Grid>
+                            <StackPanel>
+                                <TextBlock Text="修改已完成目标" FontSize="22" FontWeight="SemiBold" />
+                                <TextBlock Text="可修正名称、金额、日期和收入方式；已归档的加班与消费快照保持不变。"
+                                           Style="{StaticResource MutedTextStyle}" Margin="0,6,0,0" />
+                            </StackPanel>
+                            <Button Content="×" Width="34" Height="34" Padding="0" HorizontalAlignment="Right"
+                                    VerticalAlignment="Top" Background="Transparent" BorderThickness="0" Effect="{x:Null}"
+                                    FontSize="22" Click="CloseCompletedGoalEditButton_Click" />
+                        </Grid>
+
+                        <Grid Margin="0,22,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="18" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="目标名称" Margin="0,0,0,7" />
+                                <TextBox x:Name="CompletedGoalNameTextBox" MaxLength="100" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="目标金额（元）" Margin="0,0,0,7" />
+                                <TextBox x:Name="CompletedGoalTargetAmountTextBox" MaxLength="15" />
+                            </StackPanel>
+                        </Grid>
+                        <Grid Margin="0,16,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="18" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="起算日" Margin="0,0,0,7" />
+                                <DatePicker x:Name="CompletedGoalStartDatePicker" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="完成日" Margin="0,0,0,7" />
+                                <DatePicker x:Name="CompletedGoalCompletedDatePicker" />
+                            </StackPanel>
+                        </Grid>
+                        <StackPanel Margin="0,16,0,0">
+                            <TextBlock Text="收入计算方式" Margin="0,0,0,7" />
+                            <ComboBox x:Name="CompletedGoalIncomeModeComboBox" SelectedIndex="0">
+                                <ComboBoxItem Content="只算加班费" />
+                                <ComboBoxItem Content="加班费 + 餐补" />
+                            </ComboBox>
+                        </StackPanel>
+                        <Grid Margin="0,22,0,0">
+                            <TextBlock x:Name="CompletedGoalEditStatusText" Style="{StaticResource MutedTextStyle}"
+                                       VerticalAlignment="Center" />
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                <Button Content="取消" Padding="18,8" Margin="0,0,8,0"
+                                        Click="CloseCompletedGoalEditButton_Click" />
+                                <Button Content="保存修改" Padding="20,8" Style="{StaticResource AccentButtonStyle}"
+                                        Click="SaveCompletedGoalEditButton_Click" />
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </Border>
+
+            <Border x:Name="GoalCelebrationOverlay" Grid.Row="1" Panel.ZIndex="140" Visibility="Collapsed"
+                    Background="#B20C1726" IsHitTestVisible="True">
+                <Grid x:Name="GoalCelebrationRoot" ClipToBounds="True">
+                    <Canvas x:Name="GoalCelebrationConfettiCanvas" IsHitTestVisible="False" />
+                    <Border x:Name="GoalCelebrationCard" Width="640" Padding="36,32"
+                            HorizontalAlignment="Center" VerticalAlignment="Center"
+                            Style="{StaticResource GlassCardStyle}" Opacity="0" RenderTransformOrigin="0.5,0.5">
+                        <Border.RenderTransform>
+                            <ScaleTransform x:Name="GoalCelebrationScale" ScaleX="0.75" ScaleY="0.75" />
+                        </Border.RenderTransform>
+                        <StackPanel>
+                            <Border Width="72" Height="72" CornerRadius="36" HorizontalAlignment="Center"
+                                    Background="#1F199C6C" BorderBrush="#52199C6C" BorderThickness="1">
+                                <TextBlock Text="✓" FontSize="39" FontWeight="SemiBold" Foreground="{StaticResource SuccessBrush}"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                            <TextBlock Text="恭喜，目标达成！" FontSize="29" FontWeight="SemiBold"
+                                       HorizontalAlignment="Center" Margin="0,18,0,0" />
+                            <TextBlock x:Name="GoalCelebrationNameText" Text="目标已完成并归档"
+                                       Foreground="{StaticResource AccentBrush}" FontSize="18" FontWeight="SemiBold"
+                                       HorizontalAlignment="Center" Margin="0,8,0,0" />
+                            <UniformGrid Columns="3" Margin="0,24,0,0">
+                                <StackPanel HorizontalAlignment="Center">
+                                    <TextBlock Text="目标价格" Style="{StaticResource MutedTextStyle}" HorizontalAlignment="Center" />
+                                    <TextBlock x:Name="GoalCelebrationAmountText" Text="¥ 0.00" FontSize="17" FontWeight="SemiBold" Margin="0,6,0,0" />
+                                </StackPanel>
+                                <StackPanel HorizontalAlignment="Center">
+                                    <TextBlock Text="完成时长" Style="{StaticResource MutedTextStyle}" HorizontalAlignment="Center" />
+                                    <TextBlock x:Name="GoalCelebrationDurationText" Text="0 天" FontSize="17" FontWeight="SemiBold" Margin="0,6,0,0" />
+                                </StackPanel>
+                                <StackPanel HorizontalAlignment="Center">
+                                    <TextBlock Text="累计加班" Style="{StaticResource MutedTextStyle}" HorizontalAlignment="Center" />
+                                    <TextBlock x:Name="GoalCelebrationOvertimeText" Text="0h00m" FontSize="17" FontWeight="SemiBold" Margin="0,6,0,0" />
+                                </StackPanel>
+                            </UniformGrid>
+                            <TextBlock x:Name="GoalCelebrationSummaryText" Text="完成信息已安全保存到历史目标"
+                                       Style="{StaticResource MutedTextStyle}" HorizontalAlignment="Center"
+                                       TextAlignment="Center" TextWrapping="Wrap" Margin="0,22,0,0" />
+                            <Button Content="查看已完成目标" Style="{StaticResource AccentButtonStyle}" Padding="24,10"
+                                    HorizontalAlignment="Center" Margin="0,22,0,0"
+                                    Click="ViewCompletedGoalsButton_Click" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
             </Border>
 
             <Border x:Name="RefreshOverlay" Grid.Row="1" Panel.ZIndex="100" Visibility="Collapsed"

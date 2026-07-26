@@ -9,7 +9,6 @@ public sealed class AppSettings
     public decimal MealAllowanceAmount { get; set; } = 20m;
     public string FlexibleWorkStartEarliest { get; set; } = "08:30";
     public string FlexibleWorkStartLatest { get; set; } = "09:30";
-    public double StandardWorkSpanHours { get; set; } = 9;
     public string WorkdayOvertimeStart { get; set; } = "19:00";
     public string LunchBreakStart { get; set; } = "12:00";
     public string LunchBreakEnd { get; set; } = "13:00";
@@ -27,5 +26,4 @@ public sealed class AppSettings
     public string LastUsername { get; set; } = string.Empty;
     public string QhrBaseUrl { get; set; } = "https://hr.quectel.com";
     public string HolidaySourceUrl { get; set; } = "https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/{year}.json";
-    public string UpdateManifestUrl { get; set; } = string.Empty;
 }

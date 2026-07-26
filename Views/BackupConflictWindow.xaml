@@ -1,0 +1,68 @@
+<Window x:Class="QHR.Views.BackupConflictWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="确认备份冲突" Width="680" SizeToContent="Height" WindowStartupLocation="CenterOwner"
+        WindowStyle="None" ResizeMode="NoResize" AllowsTransparency="True" Background="Transparent"
+        ShowInTaskbar="False">
+    <Border Margin="14" Padding="26" CornerRadius="18" Background="{StaticResource WindowBackgroundBrush}"
+            BorderBrush="#CFFFFFFF" BorderThickness="1" Effect="{StaticResource PanelShadow}">
+        <StackPanel>
+            <Grid MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+                <StackPanel>
+                    <TextBlock Text="发现数据冲突" FontSize="22" FontWeight="SemiBold" />
+                    <TextBlock x:Name="BackupSourceText" Text="请确认同一条数据不一致时采用哪一份"
+                               Style="{StaticResource MutedTextStyle}" Margin="0,7,0,0" />
+                </StackPanel>
+                <Button Content="×" Width="32" Height="32" Padding="0" HorizontalAlignment="Right"
+                        VerticalAlignment="Top" Background="Transparent" BorderThickness="0" Effect="{x:Null}"
+                        FontSize="21" Click="CancelButton_Click" />
+            </Grid>
+
+            <Border Margin="0,20,0,15" Padding="15" CornerRadius="11"
+                    Background="#13E9A23B" BorderBrush="#42E9A23B" BorderThickness="1">
+                <StackPanel>
+                    <TextBlock Text="冲突汇总" FontWeight="SemiBold" />
+                    <UniformGrid Columns="4" Margin="0,11,0,0">
+                        <TextBlock x:Name="SettingsConflictText" Text="计算设置：0" />
+                        <TextBlock x:Name="AttendanceConflictText" Text="考勤日期：0" />
+                        <TextBlock x:Name="GoalConflictText" Text="目标设置：0" />
+                        <TextBlock x:Name="ExpenseConflictText" Text="消费记录：0" Margin="0,8,0,0" />
+                        <TextBlock x:Name="CompletedGoalConflictText" Text="已完成目标：0" Margin="0,8,0,0" />
+                        <TextBlock x:Name="NoteConflictText" Text="每日备注：0" Margin="0,8,0,0" />
+                        <TextBlock x:Name="ImageConflictText" Text="证据图片：0" Margin="0,8,0,0" />
+                    </UniformGrid>
+                </StackPanel>
+            </Border>
+
+            <TextBlock Text="不冲突的数据会自动合并，本机独有的数据不会删除。请选择冲突项的处理方式："
+                       TextWrapping="Wrap" Margin="1,0,0,12" />
+            <Border Padding="15,13" CornerRadius="11" Background="#52FFFFFF"
+                    BorderBrush="{StaticResource LineBrush}" BorderThickness="1" Margin="0,0,0,10">
+                <RadioButton x:Name="KeepLocalRadio" GroupName="ConflictMode">
+                    <StackPanel Margin="5,0,0,0">
+                        <TextBlock Text="冲突项保留本机数据" FontWeight="SemiBold" />
+                        <TextBlock Text="适合当前电脑已经继续记账，只补充备份中缺少的历史数据"
+                                   Style="{StaticResource MutedTextStyle}" Margin="0,4,0,0" />
+                    </StackPanel>
+                </RadioButton>
+            </Border>
+            <Border Padding="15,13" CornerRadius="11" Background="#171473E6"
+                    BorderBrush="#421473E6" BorderThickness="1">
+                <RadioButton x:Name="UseBackupRadio" GroupName="ConflictMode">
+                    <StackPanel Margin="5,0,0,0">
+                        <TextBlock Text="冲突项使用备份数据" FontWeight="SemiBold" />
+                        <TextBlock Text="适合刚更换电脑，希望恢复旧电脑备份时的内容"
+                                   Style="{StaticResource MutedTextStyle}" Margin="0,4,0,0" />
+                    </StackPanel>
+                </RadioButton>
+            </Border>
+
+            <TextBlock x:Name="ErrorText" Foreground="{StaticResource DangerBrush}" Margin="2,12,0,0" />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
+                <Button Content="取消导入" Padding="18,8" Margin="0,0,9,0" Click="CancelButton_Click" />
+                <Button Content="确认并合并" Padding="18,8" Style="{StaticResource AccentButtonStyle}"
+                        Click="ConfirmButton_Click" />
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</Window>

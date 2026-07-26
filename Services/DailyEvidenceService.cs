@@ -39,6 +39,12 @@ public sealed class DailyEvidenceService
         Directory.CreateDirectory(_rootDirectory);
     }
 
+    internal DailyEvidenceService(string rootDirectory)
+    {
+        _rootDirectory = Path.GetFullPath(rootDirectory);
+        Directory.CreateDirectory(_rootDirectory);
+    }
+
     public async Task<DailyEvidence> LoadAsync(DateOnly date, CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken);
@@ -316,6 +322,194 @@ public sealed class DailyEvidenceService
             {
                 File.Delete(temporaryPath);
             }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task ExportYearAsync(
+        int year,
+        string outputPath,
+        string yearlyCsv,
+        IReadOnlyDictionary<int, string> monthlyCsv,
+        IReadOnlyDictionary<DateOnly, string> calculationDetails,
+        CancellationToken cancellationToken = default)
+    {
+        if (year is < 1 or > 9999) throw new ArgumentOutOfRangeException(nameof(year));
+        if (calculationDetails.Keys.Any(date => date.Year != year))
+            throw new ArgumentException("年度导出明细包含其他年份的日期", nameof(calculationDetails));
+        if (monthlyCsv.Keys.Any(month => month is < 1 or > 12))
+            throw new ArgumentException("年度导出包含无效月份", nameof(monthlyCsv));
+
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            var temporaryPath = outputPath + ".tmp";
+            File.Delete(temporaryPath);
+            try
+            {
+                await using (var fileStream = new FileStream(
+                                 temporaryPath,
+                                 FileMode.CreateNew,
+                                 FileAccess.Write,
+                                 FileShare.None,
+                                 81920,
+                                 true))
+                using (var archive = new ZipArchive(
+                           fileStream,
+                           ZipArchiveMode.Create,
+                           leaveOpen: false,
+                           Encoding.UTF8))
+                {
+                    var yearFolder = $"{year:0000}年/";
+                    var yearlyEntry = archive.CreateEntry(yearFolder + "年度加班明细.csv", CompressionLevel.Optimal);
+                    await using (var entryStream = yearlyEntry.Open())
+                    await using (var writer = new StreamWriter(entryStream, new UTF8Encoding(true)))
+                    {
+                        await writer.WriteAsync(yearlyCsv);
+                    }
+
+                    var months = monthlyCsv.Keys
+                        .Concat(calculationDetails.Keys.Select(date => date.Month))
+                        .Distinct()
+                        .OrderBy(month => month)
+                        .ToArray();
+                    foreach (var month in months)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        var monthFolder = $"{yearFolder}{month:00}月/";
+                        var monthlyEntry = archive.CreateEntry(monthFolder + "月度加班明细.csv", CompressionLevel.Optimal);
+                        await using (var entryStream = monthlyEntry.Open())
+                        await using (var writer = new StreamWriter(entryStream, new UTF8Encoding(true)))
+                        {
+                            await writer.WriteAsync(monthlyCsv.GetValueOrDefault(month, string.Empty));
+                        }
+
+                        foreach (var date in calculationDetails.Keys
+                                     .Where(date => date.Month == month)
+                                     .OrderBy(date => date))
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            var evidence = await LoadCoreAsync(date, cancellationToken);
+                            var dayFolder = $"{monthFolder}{date:yyyy-MM-dd}/";
+                            var detailsEntry = archive.CreateEntry(dayFolder + "加班数据.txt", CompressionLevel.Optimal);
+                            await using (var entryStream = detailsEntry.Open())
+                            await using (var writer = new StreamWriter(entryStream, new UTF8Encoding(true)))
+                            {
+                                await writer.WriteLineAsync(calculationDetails[date]);
+                                await writer.WriteLineAsync();
+                                await writer.WriteLineAsync("备注：");
+                                await writer.WriteLineAsync(string.IsNullOrWhiteSpace(evidence.Note) ? "（无）" : evidence.Note);
+                            }
+
+                            var evidenceFolder = dayFolder + "加班证据/";
+                            archive.CreateEntry(evidenceFolder);
+                            for (var index = 0; index < evidence.Images.Count; index++)
+                            {
+                                var attachment = evidence.Images[index];
+                                var encryptedPath = GetImagePath(GetDayDirectory(date), attachment.Id);
+                                if (!File.Exists(encryptedPath)) continue;
+                                byte[]? plainBytes = null;
+                                try
+                                {
+                                    var encryptedBytes = await File.ReadAllBytesAsync(encryptedPath, cancellationToken);
+                                    plainBytes = EncryptedAttendanceCache.UnprotectForCurrentUser(encryptedBytes);
+                                    var safeName = MakeSafeFileName(attachment.OriginalFileName, attachment.Extension);
+                                    var entry = archive.CreateEntry(
+                                        $"{evidenceFolder}{index + 1:00}-{safeName}",
+                                        CompressionLevel.Optimal);
+                                    await using var entryStream = entry.Open();
+                                    await entryStream.WriteAsync(plainBytes, cancellationToken);
+                                }
+                                finally
+                                {
+                                    if (plainBytes is not null) CryptographicOperations.ZeroMemory(plainBytes);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                File.Move(temporaryPath, outputPath, true);
+            }
+            finally
+            {
+                File.Delete(temporaryPath);
+            }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    internal IReadOnlyList<DateOnly> GetStoredDates()
+    {
+        if (!Directory.Exists(_rootDirectory)) return Array.Empty<DateOnly>();
+        return Directory.EnumerateFiles(_rootDirectory, "metadata.qhrnote", SearchOption.AllDirectories)
+            .Select(path => Path.GetFileName(Path.GetDirectoryName(path)))
+            .Where(value => DateOnly.TryParseExact(value, "yyyy-MM-dd", out _))
+            .Select(value => DateOnly.ParseExact(value!, "yyyy-MM-dd"))
+            .Distinct()
+            .OrderBy(value => value)
+            .ToArray();
+    }
+
+    internal async Task<byte[]> ReadImageBytesAsync(
+        DateOnly date,
+        EvidenceAttachment attachment,
+        CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            var encryptedPath = GetImagePath(GetDayDirectory(date), attachment.Id);
+            var encryptedBytes = await File.ReadAllBytesAsync(encryptedPath, cancellationToken);
+            return EncryptedAttendanceCache.UnprotectForCurrentUser(encryptedBytes);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    internal async Task ImportImageAsync(
+        DateOnly date,
+        EvidenceAttachment attachment,
+        byte[] plainBytes,
+        bool overwrite,
+        CancellationToken cancellationToken = default)
+    {
+        if (!IsValidAttachmentId(attachment.Id)) throw new InvalidDataException("备份中的图片标识无效");
+        if (!SupportedExtensions.Contains(attachment.Extension)) throw new InvalidDataException("备份中的图片格式不受支持");
+        if (plainBytes.LongLength > MaximumImageBytes) throw new InvalidDataException("备份中的单张图片超过 20 MB");
+
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            var evidence = await LoadCoreAsync(date, cancellationToken);
+            var existingIndex = evidence.Images.FindIndex(item => item.Id == attachment.Id);
+            if (existingIndex >= 0 && !overwrite) return;
+            if (existingIndex < 0 && evidence.Images.Count >= MaximumImagesPerDay)
+                throw new InvalidDataException($"{date:yyyy-MM-dd} 的证据图片已达到 {MaximumImagesPerDay} 张上限");
+
+            var importedAttachment = new EvidenceAttachment
+            {
+                Id = attachment.Id,
+                OriginalFileName = attachment.OriginalFileName,
+                Extension = attachment.Extension.ToLowerInvariant(),
+                Length = plainBytes.LongLength,
+                AddedAt = attachment.AddedAt
+            };
+            var directory = GetDayDirectory(date);
+            Directory.CreateDirectory(directory);
+            var encryptedBytes = EncryptedAttendanceCache.ProtectForCurrentUser(plainBytes);
+            await WriteAtomicallyAsync(GetImagePath(directory, importedAttachment.Id), encryptedBytes, cancellationToken);
+            if (existingIndex >= 0) evidence.Images[existingIndex] = importedAttachment;
+            else evidence.Images.Add(importedAttachment);
+            await SaveMetadataCoreAsync(evidence, cancellationToken);
         }
         finally
         {

@@ -1,10 +1,15 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Shapes;
+using System.Windows.Threading;
 using Microsoft.Win32;
 using QHR.Models;
 using QHR.Services;
@@ -13,6 +18,9 @@ namespace QHR.Views;
 
 public partial class MainWindow : Window
 {
+    private const int DwmWindowCornerPreference = 33;
+    private const int DwmWindowCornerRound = 2;
+
     private readonly string _username;
     private readonly QhrClient _qhrClient;
     private readonly SettingsService _settingsService;
@@ -26,6 +34,8 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<SummaryRow> _yearlyRecords = [];
     private readonly ObservableCollection<SummaryRow> _analyticsYearRecords = [];
     private readonly ObservableCollection<GoalExpense> _goalExpenses = [];
+    private readonly ObservableCollection<CompletedFinancialGoal> _completedGoals = [];
+    private readonly ObservableCollection<GoalExpense> _selectedDayExpenses = [];
     private readonly ObservableCollection<EvidenceImageItem> _dayEvidenceImages = [];
     private IReadOnlyList<AttendanceRecord> _lastAttendance = Array.Empty<AttendanceRecord>();
     private IReadOnlyList<OvertimeRecord> _currentCalculatedRecords = Array.Empty<OvertimeRecord>();
@@ -42,9 +52,18 @@ public partial class MainWindow : Window
     private bool _refreshPending;
     private bool _isLoggingOut;
     private bool _goalLoaded;
-    private int _analyticsRangeYears = 3;
+    private bool _isCompletingGoal;
+    private int _analyticsRangeYears = 1;
     private int _analyticsSelectedYear = DateTime.Today.Year;
     private DateOnly? _openedDetailDate;
+    private DateOnly _expenseSelectedMonth = new(DateTime.Today.Year, DateTime.Today.Month, 1);
+    private DateOnly? _openedExpenseDate;
+    private string? _editingExpenseId;
+    private string? _editingCompletedGoalId;
+    private decimal? _expenseCalculatorAccumulator;
+    private string? _expenseCalculatorPendingOperator;
+    private bool _expenseCalculatorEnteringNewValue = true;
+    private bool _updatingOverviewMonthSelection;
 
     public MainWindow(
         string username,
@@ -64,20 +83,21 @@ public partial class MainWindow : Window
         HeaderUsernameText.Text = GetDisplayName(username);
         ProfileMenuUsernameText.Text = GetDisplayName(username);
         AvatarText.Text = GetAvatarText(username);
-        VersionMenuItem.Header = $"版本 v{UpdateService.CurrentDisplayVersion}";
-        SettingsVersionText.Text = $"当前版本 v{UpdateService.CurrentDisplayVersion}";
+        VersionMenuItem.Header = $"版本 v{LocalUpdateService.CurrentDisplayVersion}";
         var today = DateTime.Today;
-        StartDatePicker.SelectedDate = new DateTime(today.Year, today.Month, 1);
-        EndDatePicker.SelectedDate = today;
+        OverviewYearComboBox.ItemsSource = Enumerable.Range(today.Year - 9, 10).Reverse().ToArray();
+        OverviewMonthComboBox.ItemsSource = Enumerable.Range(1, 12).ToArray();
+        OverviewYearComboBox.SelectedItem = today.Year;
+        OverviewMonthComboBox.SelectedItem = today.Month;
         DailyDataGrid.ItemsSource = _dailyRecords;
         MonthlyDataGrid.ItemsSource = _monthlyRecords;
         YearlyDataGrid.ItemsSource = _yearlyRecords;
         AnalyticsYearDataGrid.ItemsSource = _analyticsYearRecords;
         AnalyticsYearComboBox.ItemsSource = Enumerable.Range(today.Year - 9, 10).Reverse().ToArray();
         AnalyticsYearComboBox.SelectedItem = today.Year;
-        GoalExpensesDataGrid.ItemsSource = _goalExpenses;
+        ExpenseDayItemsControl.ItemsSource = _selectedDayExpenses;
+        CompletedGoalsItemsControl.ItemsSource = _completedGoals;
         DayEvidenceItemsControl.ItemsSource = _dayEvidenceImages;
-        ExpenseDatePicker.SelectedDate = today;
         LoadSettingsIntoControls();
         UpdateMonthNavigationButtons();
         SelectNavigation(0);
@@ -86,6 +106,38 @@ public partial class MainWindow : Window
         Closed += MainWindow_Closed;
         StateChanged += (_, _) => MaximizeButton.Content = WindowState == WindowState.Maximized ? "❐" : "□";
     }
+
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000)) return;
+
+        try
+        {
+            var handle = new WindowInteropHelper(this).Handle;
+            var preference = DwmWindowCornerRound;
+            _ = DwmSetWindowAttribute(
+                handle,
+                DwmWindowCornerPreference,
+                ref preference,
+                Marshal.SizeOf<int>());
+        }
+        catch (DllNotFoundException)
+        {
+            // Older Windows builds do not expose the DWM corner preference API.
+        }
+        catch (EntryPointNotFoundException)
+        {
+            // Keep the WindowChrome radius as a visual fallback.
+        }
+    }
+
+    [DllImport("dwmapi.dll", PreserveSig = true)]
+    private static extern int DwmSetWindowAttribute(
+        IntPtr windowHandle,
+        int attribute,
+        ref int attributeValue,
+        int attributeSize);
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
@@ -158,10 +210,12 @@ public partial class MainWindow : Window
 
         var hours = calculated.Sum(item => item.Hours);
         var amount = calculated.Sum(item => item.OvertimePay);
+        var grossOvertimePay = OvertimeCalculator.CalculateGrossOvertimePay(calculated);
         var mealAllowanceCount = calculated.Sum(item => item.MealAllowanceCount);
         var mealAllowanceAmount = calculated.Sum(item => item.MealAllowance);
         var days = calculated.Count(item => item.Hours > 0);
         TotalHoursText.Text = hours.ToString("0.##");
+        GrossOvertimePayText.Text = $"¥ {grossOvertimePay:N2}";
         TotalAmountText.Text = $"¥ {amount:N2}";
         OvertimeDaysText.Text = days.ToString(CultureInfo.InvariantCulture);
         AverageHoursText.Text = $"日均 {(days == 0 ? 0 : hours / days):0.##} 小时";
@@ -169,7 +223,7 @@ public partial class MainWindow : Window
         MealAllowanceAmountText.Text = $"餐补合计 ¥ {mealAllowanceAmount:N2}";
         if (TryGetDateRange(out var startDate, out var endDate, false))
         {
-            RangeText.Text = $"{startDate:yyyy-MM-dd} 至 {endDate:yyyy-MM-dd}";
+            RangeText.Text = $"{startDate:yyyy 年 MM 月}";
         }
         HolidayDetailStatusText.Text = _holidayService.LastStatus;
         HolidaySourceDisplayTextBox.Text = _settings.HolidaySourceUrl;
@@ -205,23 +259,30 @@ public partial class MainWindow : Window
             var isHoliday = false;
             if (_lastCalendar.TryGetValue(date, out var holiday))
             {
-                kindText = holiday.IsOffDay ? holiday.Name : string.Empty;
-                isHoliday = holiday.IsOffDay;
+                if (holiday.IsOffDay)
+                {
+                    isHoliday = ChineseStatutoryHoliday.IsStatutory(holiday);
+                    kindText = isHoliday ? holiday.Name : $"{holiday.Name}休息";
+                }
             }
             else if (date.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
             {
                 kindText = "周末";
             }
 
-            var hasOvertime = record is { Hours: > 0 };
+            var hasGrossOvertime = record is not null && record.GrossHours > 0.0001;
+            var hasLeave = record is not null && !string.IsNullOrWhiteSpace(record.LeaveSummaryText);
             cells.Add(new CalendarDayCell
             {
                 Date = date,
                 DayText = day.ToString(CultureInfo.InvariantCulture),
                 KindText = kindText,
-                HoursText = hasOvertime ? $"加班 {record!.HoursDurationText}" : string.Empty,
-                AmountText = hasOvertime ? $"加班费 ¥{record!.OvertimePay:N2}" : string.Empty,
-                HasOvertime = hasOvertime,
+                HoursText = hasGrossOvertime ? $"加班 {record!.GrossDurationText}" : string.Empty,
+                AmountText = hasGrossOvertime ? $"加班费 ¥{record!.GrossOvertimePay:N2}" : string.Empty,
+                LeaveText = hasLeave ? record!.LeaveSummaryText : string.Empty,
+                HasOvertime = hasGrossOvertime,
+                HasLeave = hasLeave,
+                HasPersonalLeave = record?.PersonalLeaveHours > 0,
                 IsToday = date == today,
                 IsHoliday = isHoliday || record?.Kind == DayKind.Holiday
             });
@@ -230,8 +291,8 @@ public partial class MainWindow : Window
         OvertimeCalendar.ItemsSource = cells;
         var monthRecords = recordsByDate.Values.ToArray();
         CalendarMonthSummaryText.Text = $"{month:yyyy 年 MM 月} · " +
-                                        $"加班 {FormatDuration(monthRecords.Sum(item => item.Hours))} · " +
-                                        $"加班费 ¥{monthRecords.Sum(item => item.OvertimePay):N2} · " +
+                                        $"加班 {FormatDuration(monthRecords.Sum(item => item.GrossHours))} · " +
+                                        $"加班费 ¥{monthRecords.Sum(item => item.GrossOvertimePay):N2} · " +
                                         $"餐补 {monthRecords.Sum(item => item.MealAllowanceCount)} 次";
     }
 
@@ -247,12 +308,19 @@ public partial class MainWindow : Window
         DayDetailClockOutText.Text = record?.ClockOutText ?? "--:--";
         DayDetailGrossText.Text = record?.GrossDurationText ?? "0h00m";
         DayDetailDelayText.Text = record?.DelayDeductedDurationText ?? "0h00m";
-        DayDetailLeaveText.Text = record?.LeaveDeductedDurationText ?? "0h00m";
+        var leaveSummary = record is null || string.IsNullOrWhiteSpace(record.LeaveSummaryText)
+            ? "无当天请假"
+            : record.LeaveSummaryText;
+        DayDetailLeaveText.Text = record is { LeaveDeductedHours: > 0 }
+            ? $"{leaveSummary} · 月度抵扣 {record.LeaveDeductedDurationText}"
+            : record is null || string.IsNullOrWhiteSpace(record.LeaveSummaryText)
+                ? "无"
+                : $"{leaveSummary} · 不抵扣";
         DayDetailActualText.Text = record?.HoursDurationText ?? "0h00m";
         DayDetailMealCountText.Text = $"{record?.MealAllowanceCount ?? 0} 次";
-        DayDetailOvertimePayText.Text = $"¥ {record?.OvertimePay ?? 0m:N2}";
+        DayDetailOvertimePayText.Text = $"¥ {record?.GrossOvertimePay ?? 0m:N2}";
         DayDetailMealPayText.Text = $"¥ {record?.MealAllowance ?? 0m:N2}";
-        DayDetailTotalText.Text = $"¥ {record?.Amount ?? 0m:N2}";
+        DayDetailTotalText.Text = $"¥ {record?.GrossAmount ?? 0m:N2}";
         DayDetailOvertimePayText.Foreground = record?.Kind == DayKind.Holiday
             ? (Brush)FindResource("HolidayBrush")
             : (Brush)FindResource("AccentBrush");
@@ -450,21 +518,109 @@ public partial class MainWindow : Window
         }
     }
 
-    private string BuildDayExportDetails(DateOnly date)
+    private async void ExportYearEvidenceButton_Click(object sender, RoutedEventArgs e)
     {
-        var record = _currentCalculatedRecords.LastOrDefault(item => item.Date == date);
+        if (_isBusy) return;
+        var year = GetSelectedMonth().Year;
+        var dialog = new SaveFileDialog
+        {
+            Title = $"导出 {year} 年加班资料",
+            Filter = "ZIP 压缩包|*.zip",
+            DefaultExt = ".zip",
+            AddExtension = true,
+            FileName = $"QHR-年度加班资料-{year}.zip"
+        };
+        if (dialog.ShowDialog(this) != true) return;
+
+        SetBusy(true, $"正在整理 {year} 年加班资料…");
+        try
+        {
+            var today = DateOnly.FromDateTime(DateTime.Today);
+            var startDate = new DateOnly(year, 1, 1);
+            var endDate = year == today.Year ? today : new DateOnly(year, 12, 31);
+            var progress = new Progress<string>(message =>
+            {
+                HeaderStatusText.Text = message;
+                RefreshOverlayStatusText.Text = message;
+            });
+
+            var cached = await _qhrClient.LoadCachedAttendanceAsync(startDate, endDate);
+            var attendance = cached.HasAllRequestedMonths
+                ? cached.Records
+                : await _qhrClient.FetchAttendanceAsync(
+                    startDate,
+                    endDate,
+                    progress,
+                    refreshRecentMonths: false);
+            var calendar = await _holidayService.GetCalendarAsync(startDate, endDate, false);
+            var calculated = _calculator.Calculate(attendance, calendar, _settings)
+                .OrderBy(item => item.Date)
+                .ToArray();
+            var recordsByDate = calculated
+                .GroupBy(item => item.Date)
+                .ToDictionary(group => group.Key, group => group.Last());
+            var detailMap = new Dictionary<DateOnly, string>();
+            for (var date = startDate; date <= endDate; date = date.AddDays(1))
+            {
+                recordsByDate.TryGetValue(date, out var record);
+                detailMap[date] = BuildDayExportDetails(date, record, calendar);
+            }
+
+            var monthlyCsv = Enumerable.Range(1, endDate.Month)
+                .ToDictionary(
+                    month => month,
+                    month => BuildMonthExportCsv(calculated
+                        .Where(item => item.Date.Month == month)
+                        .ToArray()));
+            await _dailyEvidenceService.ExportYearAsync(
+                year,
+                dialog.FileName,
+                BuildMonthExportCsv(calculated),
+                monthlyCsv,
+                detailMap);
+            HeaderStatusText.Text = $"{year} 年加班资料已导出";
+            MessageBox.Show(this,
+                $"全年资料已导出：\n{dialog.FileName}\n\n" +
+                $"ZIP 内按 {year}年 / 月份 / 日期 分层，每天包含加班数据和加班证据目录。",
+                "导出完成",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            HeaderStatusText.Text = "年度资料导出失败";
+            MessageBox.Show(this, ex.Message, "导出失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            SetBusy(false, HeaderStatusText.Text);
+        }
+    }
+
+    private string BuildDayExportDetails(DateOnly date) =>
+        BuildDayExportDetails(
+            date,
+            _currentCalculatedRecords.LastOrDefault(item => item.Date == date),
+            _lastCalendar);
+
+    private static string BuildDayExportDetails(
+        DateOnly date,
+        OvertimeRecord? record,
+        IReadOnlyDictionary<DateOnly, HolidayInfo> calendar)
+    {
         var builder = new StringBuilder();
         builder.AppendLine("QHR 加班助手 · 当天计算明细");
         builder.AppendLine($"日期：{date:yyyy-MM-dd} {GetWeekText(date.DayOfWeek)}");
-        builder.AppendLine($"日期类型：{record?.DateTypeText ?? GetDateTypeText(date)}");
+        builder.AppendLine($"日期类型：{record?.DateTypeText ?? GetDateTypeText(date, calendar)}");
         builder.AppendLine($"首卡 / 末卡：{record?.ClockInText ?? "--:--"} / {record?.ClockOutText ?? "--:--"}");
         builder.AppendLine($"原始加班：{record?.GrossDurationText ?? "0h00m"}");
         builder.AppendLine($"延时工时抵扣：{record?.DelayDeductedDurationText ?? "0h00m"}");
-        builder.AppendLine($"请假：{record?.LeaveDeductedDurationText ?? "0h00m"}");
+        builder.AppendLine($"请假：{(string.IsNullOrWhiteSpace(record?.LeaveSummaryText) ? "无" : record.LeaveSummaryText)}");
+        builder.AppendLine($"月度事假抵扣：{record?.LeaveDeductedDurationText ?? "0h00m"}");
         builder.AppendLine($"实算加班：{record?.HoursDurationText ?? "0h00m"}");
-        builder.AppendLine($"加班费：¥ {record?.OvertimePay ?? 0m:N2}");
+        builder.AppendLine($"加班费：¥ {record?.GrossOvertimePay ?? 0m:N2}");
         builder.AppendLine($"餐补：{record?.MealAllowanceCount ?? 0} 次 / ¥ {record?.MealAllowance ?? 0m:N2}");
-        builder.AppendLine($"当天合计：¥ {record?.Amount ?? 0m:N2}");
+        builder.AppendLine($"当天合计：¥ {record?.GrossAmount ?? 0m:N2}");
         builder.AppendLine($"导出时间：{DateTime.Now:yyyy-MM-dd HH:mm:ss}");
         return builder.ToString().TrimEnd();
     }
@@ -472,7 +628,7 @@ public partial class MainWindow : Window
     private static string BuildMonthExportCsv(IReadOnlyList<OvertimeRecord> records)
     {
         var builder = new StringBuilder();
-        builder.AppendLine("日期,日期类型,首卡,末卡,原始加班,延时工时抵扣,请假,实算加班,加班费,餐补次数,餐补金额,合计");
+        builder.AppendLine("日期,日期类型,首卡,末卡,原始加班,延时工时抵扣,请假类型与时长,月度事假抵扣,实算加班,加班费,餐补次数,餐补金额,合计");
         foreach (var record in records)
         {
             builder.AppendLine(string.Join(",",
@@ -482,12 +638,13 @@ public partial class MainWindow : Window
                 EscapeCsv(record.ClockOutText),
                 EscapeCsv(record.GrossDurationText),
                 EscapeCsv(record.DelayDeductedDurationText),
+                EscapeCsv(record.LeaveSummaryText),
                 EscapeCsv(record.LeaveDeductedDurationText),
                 EscapeCsv(record.HoursDurationText),
-                record.OvertimePay.ToString("0.00", CultureInfo.InvariantCulture),
+                record.GrossOvertimePay.ToString("0.00", CultureInfo.InvariantCulture),
                 record.MealAllowanceCount.ToString(CultureInfo.InvariantCulture),
                 record.MealAllowance.ToString("0.00", CultureInfo.InvariantCulture),
-                record.Amount.ToString("0.00", CultureInfo.InvariantCulture)));
+                record.GrossAmount.ToString("0.00", CultureInfo.InvariantCulture)));
         }
         return builder.ToString();
     }
@@ -505,11 +662,18 @@ public partial class MainWindow : Window
         ? $"{bytes / 1024d / 1024d:N1} MB"
         : $"{bytes / 1024d:N0} KB";
 
-    private string GetDateTypeText(DateOnly date)
+    private string GetDateTypeText(DateOnly date) => GetDateTypeText(date, _lastCalendar);
+
+    private static string GetDateTypeText(
+        DateOnly date,
+        IReadOnlyDictionary<DateOnly, HolidayInfo> calendar)
     {
-        if (_lastCalendar.TryGetValue(date, out var holiday))
+        if (calendar.TryGetValue(date, out var holiday))
         {
-            return holiday.IsOffDay ? $"节假日 · {holiday.Name}" : $"调休工作日 · {holiday.Name}";
+            if (!holiday.IsOffDay) return $"调休工作日 · {holiday.Name}";
+            return ChineseStatutoryHoliday.IsStatutory(holiday)
+                ? $"法定节假日 · {holiday.Name}"
+                : $"周末 · {holiday.Name}假期";
         }
         return date.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday ? "周末" : "工作日";
     }
@@ -527,8 +691,10 @@ public partial class MainWindow : Window
 
     private static string FormatDuration(double hours)
     {
-        var totalMinutes = Math.Max(0, (int)Math.Round(hours * 60d, MidpointRounding.AwayFromZero));
-        return $"{totalMinutes / 60}h{totalMinutes % 60:00}m";
+        var totalMinutes = (int)Math.Round(hours * 60d, MidpointRounding.AwayFromZero);
+        var sign = totalMinutes < 0 ? "-" : string.Empty;
+        var absoluteMinutes = Math.Abs(totalMinutes);
+        return $"{sign}{absoluteMinutes / 60}h{absoluteMinutes % 60:00}m";
     }
 
     private void RecalculateAnalysisResults()
@@ -644,6 +810,32 @@ public partial class MainWindow : Window
             await EnsureAnalyticsDataAsync();
     }
 
+    private void HorizontalChartScrollViewer_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (sender is not ScrollViewer chartScroller) return;
+        if ((Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift)
+        {
+            chartScroller.ScrollToHorizontalOffset(chartScroller.HorizontalOffset - e.Delta);
+            e.Handled = true;
+            return;
+        }
+
+        var pageScroller = FindVisualAncestor<ScrollViewer>(VisualTreeHelper.GetParent(chartScroller));
+        if (pageScroller is null) return;
+        pageScroller.ScrollToVerticalOffset(pageScroller.VerticalOffset - e.Delta);
+        e.Handled = true;
+    }
+
+    private static T? FindVisualAncestor<T>(DependencyObject? current) where T : DependencyObject
+    {
+        while (current is not null)
+        {
+            if (current is T match) return match;
+            current = VisualTreeHelper.GetParent(current);
+        }
+        return null;
+    }
+
     private void MergeCurrentRangeIntoAnalysis(DateOnly startDate, DateOnly endDate)
     {
         if (_analysisLoadedOn is null || _analysisStartDate is null) return;
@@ -682,6 +874,8 @@ public partial class MainWindow : Window
         GoalStartDatePicker.SelectedDate = _goalData.StartDate.ToDateTime(TimeOnly.MinValue);
         GoalIncomeModeComboBox.SelectedIndex = _goalData.IncludeMealAllowance ? 1 : 0;
         ReplaceItems(_goalExpenses, _goalData.Expenses.OrderByDescending(item => item.Date));
+        ReplaceItems(_completedGoals, _goalData.CompletedGoals.OrderByDescending(item => item.CompletedDate));
+        UpdateCompletedGoalsVisibility();
         GoalStatusText.Text = "目标与消费记录已从本地加密档案载入";
         UpdateGoalSummary();
     }
@@ -787,6 +981,334 @@ public partial class MainWindow : Window
             : averageHourlyRate > 0
                 ? $"按当前平均 ¥{averageHourlyRate:N2}/h，预计还需加班 {Math.Ceiling((double)remaining / averageHourlyRate):N0} 小时"
                 : "已有加班数据后可估算剩余加班时长";
+        DeleteCurrentGoalButton.IsEnabled =
+            target > 0 || !string.IsNullOrWhiteSpace(_goalData.GoalName);
+        UpdateExpenseCalendar();
+
+        if (target > 0 && !string.IsNullOrWhiteSpace(_goalData.GoalName) &&
+            !_goalData.SuppressAutomaticCompletion &&
+            effective >= target && !_isCompletingGoal)
+        {
+            var completedDate = DateOnly.FromDateTime(DateTime.Today);
+            var completedGoal = new CompletedFinancialGoal
+            {
+                GoalName = _goalData.GoalName,
+                TargetAmount = target,
+                StartDate = _goalData.StartDate,
+                CompletedDate = completedDate,
+                DurationDays = Math.Max(1, completedDate.DayNumber - _goalData.StartDate.DayNumber + 1),
+                IncludedMealAllowance = _goalData.IncludeMealAllowance,
+                OvertimeHours = totalHours,
+                OvertimeDays = scopedRecords.Count(item => item.Hours > 0),
+                WorkdayHours = scopedRecords.Where(item => item.Kind == DayKind.Workday).Sum(item => item.Hours),
+                WeekendHours = scopedRecords.Where(item => item.Kind == DayKind.Weekend).Sum(item => item.Hours),
+                HolidayHours = scopedRecords.Where(item => item.Kind == DayKind.Holiday).Sum(item => item.Hours),
+                OvertimePay = overtimePay,
+                MealAllowance = mealAllowance,
+                EarnedAmount = earned,
+                ExpenseAmount = expenses,
+                EffectiveAmount = effective,
+                Expenses = _goalExpenses.ToList()
+            };
+            _ = CompleteGoalAsync(completedGoal);
+        }
+    }
+
+    private async Task CompleteGoalAsync(CompletedFinancialGoal completedGoal)
+    {
+        if (_isCompletingGoal) return;
+        _isCompletingGoal = true;
+        try
+        {
+            var history = _goalData.CompletedGoals
+                .Where(item => item.Id != completedGoal.Id)
+                .Prepend(completedGoal)
+                .OrderByDescending(item => item.CompletedDate)
+                .ToList();
+            var today = DateOnly.FromDateTime(DateTime.Today);
+            var nextGoalData = new FinancialGoalData
+            {
+                Version = 4,
+                GoalName = string.Empty,
+                TargetAmount = 0,
+                StartDate = new DateOnly(today.Year, 1, 1),
+                IncludeMealAllowance = false,
+                SuppressAutomaticCompletion = false,
+                Expenses = [],
+                CompletedGoals = history
+            };
+
+            await _financialGoalService.SaveAsync(nextGoalData);
+            _goalData = nextGoalData;
+            _goalExpenses.Clear();
+            ReplaceItems(_completedGoals, history);
+            GoalNameTextBox.Clear();
+            GoalTargetAmountTextBox.Clear();
+            GoalStartDatePicker.SelectedDate = nextGoalData.StartDate.ToDateTime(TimeOnly.MinValue);
+            GoalIncomeModeComboBox.SelectedIndex = 0;
+            GoalStatusText.Text = $"“{completedGoal.GoalName}”已完成并移入历史目标";
+            UpdateCompletedGoalsVisibility();
+            UpdateGoalSummary();
+
+            while (_isBusy && !_isLoggingOut) await Task.Delay(100);
+            if (!_isLoggingOut) ShowGoalCelebration(completedGoal);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "目标归档失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            _isCompletingGoal = false;
+        }
+    }
+
+    private void UpdateCompletedGoalsVisibility()
+    {
+        CompletedGoalsBorder.Visibility = _completedGoals.Count == 0
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        CompletedGoalsSummaryText.Text = _completedGoals.Count == 0
+            ? "达成的目标会自动归档到这里"
+            : $"共完成 {_completedGoals.Count} 个目标，最近一次完成于 {_completedGoals[0].CompletedDate:yyyy-MM-dd}";
+    }
+
+    private void ShowGoalCelebration(CompletedFinancialGoal completedGoal)
+    {
+        GoalCelebrationNameText.Text = $"“{completedGoal.GoalName}”已完成并安全归档";
+        GoalCelebrationAmountText.Text = completedGoal.TargetAmountText;
+        GoalCelebrationDurationText.Text = completedGoal.DurationText;
+        GoalCelebrationOvertimeText.Text = completedGoal.OvertimeHoursText;
+        GoalCelebrationSummaryText.Text =
+            $"加班 {completedGoal.OvertimeDays} 天 · 加班费 {completedGoal.OvertimePayText} · 餐补 {completedGoal.MealAllowanceText}";
+        GoalCelebrationOverlay.Visibility = Visibility.Visible;
+        GoalCelebrationCard.Opacity = 0;
+        GoalCelebrationScale.ScaleX = 0.75;
+        GoalCelebrationScale.ScaleY = 0.75;
+
+        var easing = new BackEase { Amplitude = 0.25, EasingMode = EasingMode.EaseOut };
+        GoalCelebrationCard.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(420)));
+        GoalCelebrationScale.BeginAnimation(ScaleTransform.ScaleXProperty,
+            new DoubleAnimation(0.75, 1, TimeSpan.FromMilliseconds(560)) { EasingFunction = easing });
+        GoalCelebrationScale.BeginAnimation(ScaleTransform.ScaleYProperty,
+            new DoubleAnimation(0.75, 1, TimeSpan.FromMilliseconds(560)) { EasingFunction = easing });
+        GoalCelebrationRoot.Dispatcher.BeginInvoke(SpawnGoalCelebrationConfetti, DispatcherPriority.Loaded);
+    }
+
+    private void SpawnGoalCelebrationConfetti()
+    {
+        GoalCelebrationConfettiCanvas.Children.Clear();
+        var width = Math.Max(700, GoalCelebrationRoot.ActualWidth);
+        var height = Math.Max(600, GoalCelebrationRoot.ActualHeight);
+        var colors = new[] { "#1473E6", "#199C6C", "#F4A12C", "#8A4BD6", "#E45C78" };
+
+        for (var index = 0; index < 44; index++)
+        {
+            var piece = new Rectangle
+            {
+                Width = Random.Shared.Next(5, 12),
+                Height = Random.Shared.Next(10, 23),
+                RadiusX = 2,
+                RadiusY = 2,
+                Fill = (Brush)new BrushConverter().ConvertFromString(colors[index % colors.Length])!,
+                RenderTransform = new RotateTransform(Random.Shared.Next(0, 180)),
+                Opacity = 0.95
+            };
+            var startLeft = Random.Shared.NextDouble() * width;
+            var startTop = -Random.Shared.Next(20, 240);
+            Canvas.SetLeft(piece, startLeft);
+            Canvas.SetTop(piece, startTop);
+            GoalCelebrationConfettiCanvas.Children.Add(piece);
+
+            var duration = TimeSpan.FromMilliseconds(Random.Shared.Next(2100, 3900));
+            var delay = TimeSpan.FromMilliseconds(Random.Shared.Next(0, 650));
+            piece.BeginAnimation(Canvas.TopProperty, new DoubleAnimation(startTop, height + 40, duration)
+            {
+                BeginTime = delay,
+                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseIn },
+                FillBehavior = FillBehavior.Stop
+            });
+            piece.BeginAnimation(OpacityProperty, new DoubleAnimation(0.95, 0.15, duration)
+            {
+                BeginTime = delay,
+                FillBehavior = FillBehavior.Stop
+            });
+        }
+    }
+
+    private void ViewCompletedGoalsButton_Click(object sender, RoutedEventArgs e)
+    {
+        GoalCelebrationOverlay.Visibility = Visibility.Collapsed;
+        GoalCelebrationConfettiCanvas.Children.Clear();
+        CompletedGoalsBorder.BringIntoView();
+    }
+
+    private void EditCompletedGoalButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { DataContext: CompletedFinancialGoal goal }) return;
+        _editingCompletedGoalId = goal.Id;
+        CompletedGoalNameTextBox.Text = goal.GoalName;
+        CompletedGoalTargetAmountTextBox.Text = goal.TargetAmount.ToString("0.##", CultureInfo.InvariantCulture);
+        CompletedGoalStartDatePicker.SelectedDate = goal.StartDate.ToDateTime(TimeOnly.MinValue);
+        CompletedGoalCompletedDatePicker.SelectedDate = goal.CompletedDate.ToDateTime(TimeOnly.MinValue);
+        CompletedGoalIncomeModeComboBox.SelectedIndex = goal.IncludedMealAllowance ? 1 : 0;
+        CompletedGoalEditStatusText.Text = "归档的加班、餐补和消费快照不会被删除";
+        CompletedGoalEditOverlay.Visibility = Visibility.Visible;
+        CompletedGoalNameTextBox.Focus();
+    }
+
+    private void CloseCompletedGoalEditButton_Click(object sender, RoutedEventArgs e) =>
+        CloseCompletedGoalEditor();
+
+    private void CloseCompletedGoalEditor()
+    {
+        CompletedGoalEditOverlay.Visibility = Visibility.Collapsed;
+        _editingCompletedGoalId = null;
+        CompletedGoalEditStatusText.Text = string.Empty;
+    }
+
+    private async void SaveCompletedGoalEditButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await EnsureGoalDataAsync();
+            var source = _goalData.CompletedGoals.FirstOrDefault(item => item.Id == _editingCompletedGoalId)
+                         ?? throw new InvalidOperationException("该历史目标已不存在");
+            var name = CompletedGoalNameTextBox.Text.Trim();
+            if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("请输入目标名称");
+            var target = ReadDecimal(CompletedGoalTargetAmountTextBox.Text, "目标金额");
+            if (target <= 0) throw new ArgumentException("目标金额必须大于 0");
+            if (CompletedGoalStartDatePicker.SelectedDate is not DateTime startValue)
+                throw new ArgumentException("请选择起算日");
+            if (CompletedGoalCompletedDatePicker.SelectedDate is not DateTime completedValue)
+                throw new ArgumentException("请选择完成日");
+            var startDate = DateOnly.FromDateTime(startValue);
+            var completedDate = DateOnly.FromDateTime(completedValue);
+            var today = DateOnly.FromDateTime(DateTime.Today);
+            if (completedDate < startDate) throw new ArgumentException("完成日不能早于起算日");
+            if (completedDate > today) throw new ArgumentException("完成日不能晚于今天");
+
+            var includesMealAllowance = CompletedGoalIncomeModeComboBox.SelectedIndex == 1;
+            var earnedAmount = source.OvertimePay + (includesMealAllowance ? source.MealAllowance : 0);
+            var replacement = new CompletedFinancialGoal
+            {
+                Id = source.Id,
+                GoalName = name,
+                TargetAmount = decimal.Round(target, 2, MidpointRounding.AwayFromZero),
+                StartDate = startDate,
+                CompletedDate = completedDate,
+                DurationDays = Math.Max(1, completedDate.DayNumber - startDate.DayNumber + 1),
+                IncludedMealAllowance = includesMealAllowance,
+                OvertimeHours = source.OvertimeHours,
+                OvertimeDays = source.OvertimeDays,
+                WorkdayHours = source.WorkdayHours,
+                WeekendHours = source.WeekendHours,
+                HolidayHours = source.HolidayHours,
+                OvertimePay = source.OvertimePay,
+                MealAllowance = source.MealAllowance,
+                EarnedAmount = earnedAmount,
+                ExpenseAmount = source.ExpenseAmount,
+                EffectiveAmount = earnedAmount - source.ExpenseAmount,
+                Expenses = source.Expenses.ToList()
+            };
+            var history = _goalData.CompletedGoals
+                .Select(item => item.Id == source.Id ? replacement : item)
+                .OrderByDescending(item => item.CompletedDate)
+                .ToList();
+            var previousHistory = _goalData.CompletedGoals;
+            _goalData.CompletedGoals = history;
+            _goalData.Version = 4;
+            try
+            {
+                await _financialGoalService.SaveAsync(_goalData);
+            }
+            catch
+            {
+                _goalData.CompletedGoals = previousHistory;
+                throw;
+            }
+
+            ReplaceItems(_completedGoals, history);
+            UpdateCompletedGoalsVisibility();
+            GoalStatusText.Text = $"已修改历史目标“{name}”";
+            CloseCompletedGoalEditor();
+        }
+        catch (Exception ex)
+        {
+            CompletedGoalEditStatusText.Text = ex.Message;
+            MessageBox.Show(this, ex.Message, "无法修改历史目标", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private async void RestoreCompletedGoalButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { DataContext: CompletedFinancialGoal goal }) return;
+        try
+        {
+            await EnsureGoalDataAsync();
+            if (!string.IsNullOrWhiteSpace(_goalData.GoalName) || _goalData.TargetAmount > 0)
+            {
+                MessageBox.Show(this, "当前已有目标，请先完成或清理当前目标后再恢复历史目标。",
+                    "无法设为当前目标", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            if (MessageBox.Show(this,
+                    $"确定将“{goal.GoalName}”从历史记录恢复为当前目标吗？\n\n归档时的 {goal.Expenses.Count} 笔消费也会一起恢复。",
+                    "恢复当前目标", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+                return;
+
+            var history = _goalData.CompletedGoals
+                .Where(item => item.Id != goal.Id)
+                .OrderByDescending(item => item.CompletedDate)
+                .ToList();
+            var restoredExpenses = goal.Expenses
+                .Concat(_goalData.Expenses)
+                .GroupBy(item => item.Id, StringComparer.Ordinal)
+                .Select(group => group.Last())
+                .OrderByDescending(item => item.Date)
+                .ToList();
+            var restoredData = new FinancialGoalData
+            {
+                Version = 4,
+                GoalName = goal.GoalName,
+                TargetAmount = goal.TargetAmount,
+                StartDate = goal.StartDate,
+                IncludeMealAllowance = goal.IncludedMealAllowance,
+                SuppressAutomaticCompletion = true,
+                Expenses = restoredExpenses,
+                CompletedGoals = history
+            };
+            await _financialGoalService.SaveAsync(restoredData);
+            _goalData = restoredData;
+            ReplaceItems(_goalExpenses, restoredData.Expenses);
+            ReplaceItems(_completedGoals, history);
+            GoalNameTextBox.Text = restoredData.GoalName;
+            GoalTargetAmountTextBox.Text = restoredData.TargetAmount.ToString("0.##", CultureInfo.InvariantCulture);
+            GoalStartDatePicker.SelectedDate = restoredData.StartDate.ToDateTime(TimeOnly.MinValue);
+            GoalIncomeModeComboBox.SelectedIndex = restoredData.IncludeMealAllowance ? 1 : 0;
+            if (restoredData.Expenses.Count > 0)
+            {
+                var latestExpenseDate = restoredData.Expenses.Max(item => item.Date);
+                _expenseSelectedMonth = new DateOnly(latestExpenseDate.Year, latestExpenseDate.Month, 1);
+            }
+            UpdateCompletedGoalsVisibility();
+            GoalStatusText.Text = "历史目标已恢复；请按需调整后点“保存目标”重新启用自动完成";
+
+            var requiresEarlierHistory = _analysisStartDate is null || restoredData.StartDate < _analysisStartDate.Value;
+            if (requiresEarlierHistory)
+            {
+                _analysisLoadedOn = null;
+                await EnsureAnalyticsDataAsync();
+            }
+            else
+            {
+                UpdateGoalSummary();
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "无法恢复历史目标", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     private async void SaveGoalButton_Click(object sender, RoutedEventArgs e)
@@ -810,6 +1332,7 @@ public partial class MainWindow : Window
             _goalData.TargetAmount = target;
             _goalData.StartDate = startDate;
             _goalData.IncludeMealAllowance = GoalIncomeModeComboBox.SelectedIndex == 1;
+            _goalData.SuppressAutomaticCompletion = false;
             _goalData.Expenses = _goalExpenses.ToList();
             await _financialGoalService.SaveAsync(_goalData);
             GoalStatusText.Text = "目标已加密保存";
@@ -829,30 +1352,121 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void DeleteCurrentGoalButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await EnsureGoalDataAsync();
+            if (_goalData.TargetAmount <= 0 && string.IsNullOrWhiteSpace(_goalData.GoalName))
+            {
+                MessageBox.Show(this, "当前没有可删除的目标。", "删除当前目标",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var displayName = string.IsNullOrWhiteSpace(_goalData.GoalName)
+                ? "当前目标"
+                : $"“{_goalData.GoalName}”";
+            if (MessageBox.Show(this,
+                    $"确定删除{displayName}吗？\n\n消费账本和历史已完成目标都会保留，删除后即可把历史目标恢复为当前目标。",
+                    "删除当前目标", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                return;
+
+            var today = DateOnly.FromDateTime(DateTime.Today);
+            var clearedData = new FinancialGoalData
+            {
+                Version = 4,
+                GoalName = string.Empty,
+                TargetAmount = 0,
+                StartDate = new DateOnly(today.Year, 1, 1),
+                IncludeMealAllowance = false,
+                SuppressAutomaticCompletion = false,
+                Expenses = _goalExpenses.ToList(),
+                CompletedGoals = _goalData.CompletedGoals
+                    .OrderByDescending(item => item.CompletedDate)
+                    .ToList()
+            };
+
+            await _financialGoalService.SaveAsync(clearedData);
+            _goalData = clearedData;
+            GoalNameTextBox.Clear();
+            GoalTargetAmountTextBox.Clear();
+            GoalStartDatePicker.SelectedDate = clearedData.StartDate.ToDateTime(TimeOnly.MinValue);
+            GoalIncomeModeComboBox.SelectedIndex = 0;
+            GoalStatusText.Text = "当前目标已删除；消费账本和历史目标均已保留";
+            UpdateGoalSummary();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "无法删除当前目标", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
     private async void AddExpenseButton_Click(object sender, RoutedEventArgs e)
     {
         try
         {
             await EnsureGoalDataAsync();
-            if (ExpenseDatePicker.SelectedDate is not DateTime selectedDate)
+            if (ExpenseDatePicker.SelectedDate is not DateTime selectedDateValue)
                 throw new ArgumentException("请选择消费日期");
+            var selectedDate = DateOnly.FromDateTime(selectedDateValue);
+            if (selectedDate > DateOnly.FromDateTime(DateTime.Today))
+                throw new ArgumentException("不能记录未来日期的消费");
             var description = ExpenseDescriptionTextBox.Text.Trim();
             if (string.IsNullOrWhiteSpace(description)) throw new ArgumentException("请输入消费说明");
             var amount = ReadDecimal(ExpenseAmountTextBox.Text, "消费金额");
             if (amount <= 0) throw new ArgumentException("消费金额必须大于 0");
+            amount = decimal.Round(amount, 2, MidpointRounding.AwayFromZero);
 
-            _goalExpenses.Insert(0, new GoalExpense
+            var previousExpenses = _goalData.Expenses.ToList();
+            var savedExpense = new GoalExpense
             {
-                Date = DateOnly.FromDateTime(selectedDate),
+                Id = _editingExpenseId ?? Guid.NewGuid().ToString("N"),
+                Date = selectedDate,
                 Description = description,
                 Amount = amount
-            });
-            _goalData.Expenses = _goalExpenses.ToList();
-            await _financialGoalService.SaveAsync(_goalData);
-            ExpenseDescriptionTextBox.Clear();
-            ExpenseAmountTextBox.Clear();
-            GoalStatusText.Text = "消费记录已加密保存";
+            };
+            var wasEditing = _editingExpenseId is not null;
+            List<GoalExpense> updatedExpenses;
+            if (wasEditing)
+            {
+                if (!previousExpenses.Any(item => item.Id == _editingExpenseId))
+                    throw new InvalidOperationException("该消费记录已不存在");
+                updatedExpenses = previousExpenses
+                    .Select(item => item.Id == _editingExpenseId ? savedExpense : item)
+                    .OrderByDescending(item => item.Date)
+                    .ThenBy(item => item.Id, StringComparer.Ordinal)
+                    .ToList();
+            }
+            else
+            {
+                updatedExpenses = previousExpenses
+                    .Prepend(savedExpense)
+                    .OrderByDescending(item => item.Date)
+                    .ThenBy(item => item.Id, StringComparer.Ordinal)
+                    .ToList();
+            }
+
+            _goalData.Expenses = updatedExpenses;
+            try
+            {
+                await _financialGoalService.SaveAsync(_goalData);
+            }
+            catch
+            {
+                _goalData.Expenses = previousExpenses;
+                throw;
+            }
+
+            ReplaceItems(_goalExpenses, updatedExpenses);
+            _openedExpenseDate = selectedDate;
+            _expenseSelectedMonth = new DateOnly(selectedDate.Year, selectedDate.Month, 1);
+            ResetExpenseEditor(selectedDate);
+            GoalStatusText.Text = wasEditing ? "消费记录已修改并加密保存" : "消费记录已加密保存";
             UpdateGoalSummary();
+            UpdateExpenseDayDetails();
+            ExpenseEntryStatusText.Text = $"{(wasEditing ? "已修改" : "已保存")}：{description} · ¥{amount:N2}";
+            ExpenseDescriptionTextBox.Focus();
         }
         catch (Exception ex)
         {
@@ -860,9 +1474,44 @@ public partial class MainWindow : Window
         }
     }
 
+    private void EditExpenseButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { DataContext: GoalExpense expense }) return;
+        _editingExpenseId = expense.Id;
+        ExpenseEntryTitleText.Text = "修改消费";
+        ExpenseDescriptionTextBox.Text = expense.Description;
+        ExpenseAmountTextBox.Text = expense.Amount.ToString("0.##", CultureInfo.InvariantCulture);
+        ExpenseDatePicker.SelectedDate = expense.Date.ToDateTime(TimeOnly.MinValue);
+        SaveExpenseButton.Content = "保存修改";
+        CancelExpenseEditButton.Visibility = Visibility.Visible;
+        ExpenseEntryStatusText.Text = "可修改日期、说明或金额";
+        ExpenseDescriptionTextBox.Focus();
+        ExpenseDescriptionTextBox.SelectAll();
+    }
+
+    private void CancelExpenseEditButton_Click(object sender, RoutedEventArgs e) =>
+        ResetExpenseEditor(_openedExpenseDate);
+
+    private void ResetExpenseEditor(DateOnly? date)
+    {
+        _editingExpenseId = null;
+        ExpenseEntryTitleText.Text = "记一笔消费";
+        ExpenseDescriptionTextBox.Clear();
+        ExpenseAmountTextBox.Clear();
+        ExpenseDatePicker.SelectedDate = date?.ToDateTime(TimeOnly.MinValue);
+        SaveExpenseButton.Content = "保存这笔消费";
+        CancelExpenseEditButton.Visibility = Visibility.Collapsed;
+        ExpenseCalculatorPanel.Visibility = Visibility.Collapsed;
+        ResetExpenseCalculator(0);
+        ExpenseEntryStatusText.Text = date is DateOnly selectedDate
+            ? $"正在记录 {selectedDate:MM 月 dd 日} 的消费"
+            : "请先选择消费日期";
+    }
+
     private async void DeleteExpenseButton_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button { DataContext: GoalExpense expense }) return;
+        if (_editingExpenseId == expense.Id) ResetExpenseEditor(_openedExpenseDate);
         var index = _goalExpenses.IndexOf(expense);
         try
         {
@@ -871,14 +1520,312 @@ public partial class MainWindow : Window
             await _financialGoalService.SaveAsync(_goalData);
             GoalStatusText.Text = "消费记录已删除并加密保存";
             UpdateGoalSummary();
+            UpdateExpenseDayDetails();
         }
         catch (Exception ex)
         {
             _goalExpenses.Insert(Math.Max(0, index), expense);
             _goalData.Expenses = _goalExpenses.ToList();
+            UpdateGoalSummary();
+            UpdateExpenseDayDetails();
             MessageBox.Show(this, ex.Message, "无法删除消费", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
+
+    private void UpdateExpenseCalendar()
+    {
+        if (!_goalLoaded || ExpenseCalendar is null) return;
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        var firstDay = new DateOnly(_expenseSelectedMonth.Year, _expenseSelectedMonth.Month, 1);
+        var daysInMonth = DateTime.DaysInMonth(firstDay.Year, firstDay.Month);
+        var leadingBlankCount = ((int)firstDay.DayOfWeek + 6) % 7;
+        var cellCount = (int)Math.Ceiling((leadingBlankCount + daysInMonth) / 7d) * 7;
+        var expensesByDay = _goalExpenses
+            .Where(item => item.Date.Year == firstDay.Year && item.Date.Month == firstDay.Month)
+            .GroupBy(item => item.Date)
+            .ToDictionary(group => group.Key, group => group.ToArray());
+
+        var cells = new List<ExpenseCalendarDayCell>(cellCount);
+        for (var index = 0; index < cellCount; index++)
+        {
+            var day = index - leadingBlankCount + 1;
+            if (day is < 1 || day > daysInMonth)
+            {
+                cells.Add(new ExpenseCalendarDayCell());
+                continue;
+            }
+
+            var date = new DateOnly(firstDay.Year, firstDay.Month, day);
+            expensesByDay.TryGetValue(date, out var dayExpenses);
+            dayExpenses ??= [];
+            var total = dayExpenses.Sum(item => item.Amount);
+            cells.Add(new ExpenseCalendarDayCell
+            {
+                Date = date,
+                DayText = day.ToString(CultureInfo.InvariantCulture),
+                AmountText = dayExpenses.Length == 0 ? string.Empty : $"消费 ¥{total:N2}",
+                CountText = dayExpenses.Length == 0 ? string.Empty : $"{dayExpenses.Length} 笔",
+                HasExpense = dayExpenses.Length > 0,
+                IsToday = date == today,
+                IsFuture = date > today
+            });
+        }
+
+        ExpenseCalendar.ItemsSource = cells;
+        var monthExpenses = expensesByDay.Values.SelectMany(items => items).ToArray();
+        var monthTotal = monthExpenses.Sum(item => item.Amount);
+        ExpenseCalendarMonthSummaryText.Text = monthExpenses.Length == 0
+            ? $"{firstDay:yyyy 年 MM 月} · 暂无消费"
+            : $"{firstDay:yyyy 年 MM 月} · 消费 ¥{monthTotal:N2} · {monthExpenses.Length} 笔";
+        NextExpenseMonthButton.IsEnabled = firstDay < new DateOnly(today.Year, today.Month, 1);
+    }
+
+    private void SetExpenseSelectedMonth(DateOnly month)
+    {
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        var currentMonth = new DateOnly(today.Year, today.Month, 1);
+        _expenseSelectedMonth = month > currentMonth ? currentMonth : new DateOnly(month.Year, month.Month, 1);
+        UpdateExpenseCalendar();
+    }
+
+    private void PreviousExpenseMonthButton_Click(object sender, RoutedEventArgs e) =>
+        SetExpenseSelectedMonth(_expenseSelectedMonth.AddMonths(-1));
+
+    private void NextExpenseMonthButton_Click(object sender, RoutedEventArgs e)
+    {
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        var currentMonth = new DateOnly(today.Year, today.Month, 1);
+        if (_expenseSelectedMonth < currentMonth) SetExpenseSelectedMonth(_expenseSelectedMonth.AddMonths(1));
+    }
+
+    private void CurrentExpenseMonthButton_Click(object sender, RoutedEventArgs e)
+    {
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        SetExpenseSelectedMonth(new DateOnly(today.Year, today.Month, 1));
+    }
+
+    private void ExpenseCalendarDay_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: ExpenseCalendarDayCell { Date: DateOnly date } cell } ||
+            cell.IsFuture) return;
+
+        _openedExpenseDate = date;
+        ResetExpenseEditor(date);
+        UpdateExpenseDayDetails();
+        ExpenseDetailOverlay.Visibility = Visibility.Visible;
+        ExpenseDescriptionTextBox.Focus();
+        e.Handled = true;
+    }
+
+    private void CloseExpenseDetailButton_Click(object sender, RoutedEventArgs e)
+    {
+        ExpenseDetailOverlay.Visibility = Visibility.Collapsed;
+        ResetExpenseEditor(null);
+        _openedExpenseDate = null;
+    }
+
+    private void UpdateExpenseDayDetails()
+    {
+        if (_openedExpenseDate is not DateOnly date || ExpenseDayItemsControl is null) return;
+        var expenses = _goalExpenses.Where(item => item.Date == date).ToArray();
+        ReplaceItems(_selectedDayExpenses, expenses);
+        var total = expenses.Sum(item => item.Amount);
+        ExpenseDetailTitleText.Text = $"{date:yyyy 年 MM 月 dd 日} · {GetWeekText(date.DayOfWeek)}";
+        ExpenseDetailSummaryText.Text = expenses.Length == 0
+            ? "当天暂无消费记录"
+            : $"当天共 {expenses.Length} 笔 · 合计 ¥{total:N2}";
+        ExpenseDayEmptyText.Visibility = expenses.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        ExpenseEntryStatusText.Text = $"正在记录 {date:MM 月 dd 日} 的消费";
+    }
+
+    private void ExpenseAmountTextBox_PreviewTextInput(object sender, TextCompositionEventArgs e)
+    {
+        if (sender is not TextBox textBox) return;
+        e.Handled = !IsValidExpenseAmountText(BuildTextAfterInput(textBox, e.Text));
+    }
+
+    private void ExpenseAmountTextBox_Pasting(object sender, DataObjectPastingEventArgs e)
+    {
+        if (sender is not TextBox textBox || !e.DataObject.GetDataPresent(DataFormats.UnicodeText))
+        {
+            e.CancelCommand();
+            return;
+        }
+
+        var pastedText = e.DataObject.GetData(DataFormats.UnicodeText)?.ToString() ?? string.Empty;
+        if (!IsValidExpenseAmountText(BuildTextAfterInput(textBox, pastedText))) e.CancelCommand();
+    }
+
+    private static string BuildTextAfterInput(TextBox textBox, string input)
+    {
+        var text = textBox.Text ?? string.Empty;
+        var selectionStart = Math.Clamp(textBox.SelectionStart, 0, text.Length);
+        var selectionLength = Math.Clamp(textBox.SelectionLength, 0, text.Length - selectionStart);
+        return text.Remove(selectionStart, selectionLength).Insert(selectionStart, input);
+    }
+
+    private static bool IsValidExpenseAmountText(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return true;
+        if (text.Length > 15 || text.Any(character => !char.IsDigit(character) && character != '.')) return false;
+        var separatorIndex = text.IndexOf('.');
+        if (separatorIndex != text.LastIndexOf('.')) return false;
+        return separatorIndex < 0 || text.Length - separatorIndex - 1 <= 2;
+    }
+
+    private void ToggleExpenseCalculatorButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (ExpenseCalculatorPanel.Visibility == Visibility.Visible)
+        {
+            ExpenseCalculatorPanel.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var initialValue = TryReadDecimal(ExpenseAmountTextBox.Text, out var parsed) ? parsed : 0;
+        ResetExpenseCalculator(initialValue);
+        ExpenseCalculatorPanel.Visibility = Visibility.Visible;
+    }
+
+    private void ExpenseCalculatorButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string key }) return;
+        try
+        {
+            switch (key)
+            {
+                case "clear":
+                    ResetExpenseCalculator(0);
+                    break;
+                case "back":
+                    BackspaceExpenseCalculator();
+                    break;
+                case "+" or "-" or "*" or "/":
+                    SelectExpenseCalculatorOperator(key);
+                    break;
+                case "=":
+                    CompleteExpenseCalculatorOperation();
+                    break;
+                case "cancel":
+                    ExpenseCalculatorPanel.Visibility = Visibility.Collapsed;
+                    break;
+                case "use":
+                    CompleteExpenseCalculatorOperation();
+                    var result = decimal.Round(ReadExpenseCalculatorDisplay(), 2, MidpointRounding.AwayFromZero);
+                    if (result < 0) throw new InvalidOperationException("消费金额不能为负数");
+                    ExpenseAmountTextBox.Text = result.ToString("0.##", CultureInfo.InvariantCulture);
+                    ExpenseAmountTextBox.CaretIndex = ExpenseAmountTextBox.Text.Length;
+                    ExpenseCalculatorPanel.Visibility = Visibility.Collapsed;
+                    ExpenseEntryStatusText.Text = $"计算结果已回填：¥{result:N2}";
+                    break;
+                case ".":
+                    AppendExpenseCalculatorDecimalPoint();
+                    break;
+                default:
+                    if (key.Length == 1 && char.IsDigit(key[0])) AppendExpenseCalculatorDigit(key);
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            ExpenseEntryStatusText.Text = ex.Message;
+        }
+    }
+
+    private void ResetExpenseCalculator(decimal value)
+    {
+        ExpenseCalculatorDisplayTextBox.Text = FormatExpenseCalculatorValue(value);
+        _expenseCalculatorAccumulator = null;
+        _expenseCalculatorPendingOperator = null;
+        _expenseCalculatorEnteringNewValue = true;
+    }
+
+    private void AppendExpenseCalculatorDigit(string digit)
+    {
+        var display = ExpenseCalculatorDisplayTextBox.Text;
+        if (_expenseCalculatorEnteringNewValue || display == "0")
+        {
+            ExpenseCalculatorDisplayTextBox.Text = digit;
+            _expenseCalculatorEnteringNewValue = false;
+            return;
+        }
+        if (display.Length < 18) ExpenseCalculatorDisplayTextBox.Text += digit;
+    }
+
+    private void AppendExpenseCalculatorDecimalPoint()
+    {
+        if (_expenseCalculatorEnteringNewValue)
+        {
+            ExpenseCalculatorDisplayTextBox.Text = "0.";
+            _expenseCalculatorEnteringNewValue = false;
+            return;
+        }
+        if (!ExpenseCalculatorDisplayTextBox.Text.Contains('.', StringComparison.Ordinal))
+            ExpenseCalculatorDisplayTextBox.Text += ".";
+    }
+
+    private void BackspaceExpenseCalculator()
+    {
+        if (_expenseCalculatorEnteringNewValue) return;
+        var display = ExpenseCalculatorDisplayTextBox.Text;
+        display = display.Length > 1 ? display[..^1] : "0";
+        if (display == "-") display = "0";
+        ExpenseCalculatorDisplayTextBox.Text = display;
+    }
+
+    private void SelectExpenseCalculatorOperator(string operation)
+    {
+        var current = ReadExpenseCalculatorDisplay();
+        if (_expenseCalculatorPendingOperator is not null && !_expenseCalculatorEnteringNewValue)
+        {
+            _expenseCalculatorAccumulator = ApplyExpenseCalculatorOperation(
+                _expenseCalculatorAccumulator ?? 0,
+                current,
+                _expenseCalculatorPendingOperator);
+            ExpenseCalculatorDisplayTextBox.Text = FormatExpenseCalculatorValue(_expenseCalculatorAccumulator.Value);
+        }
+        else if (_expenseCalculatorAccumulator is null)
+        {
+            _expenseCalculatorAccumulator = current;
+        }
+
+        _expenseCalculatorPendingOperator = operation;
+        _expenseCalculatorEnteringNewValue = true;
+    }
+
+    private void CompleteExpenseCalculatorOperation()
+    {
+        if (_expenseCalculatorPendingOperator is null || _expenseCalculatorEnteringNewValue) return;
+        var result = ApplyExpenseCalculatorOperation(
+            _expenseCalculatorAccumulator ?? 0,
+            ReadExpenseCalculatorDisplay(),
+            _expenseCalculatorPendingOperator);
+        ExpenseCalculatorDisplayTextBox.Text = FormatExpenseCalculatorValue(result);
+        _expenseCalculatorAccumulator = result;
+        _expenseCalculatorPendingOperator = null;
+        _expenseCalculatorEnteringNewValue = true;
+    }
+
+    private decimal ReadExpenseCalculatorDisplay() =>
+        decimal.TryParse(ExpenseCalculatorDisplayTextBox.Text, NumberStyles.Number,
+            CultureInfo.InvariantCulture, out var value) ? value : 0;
+
+    private static decimal ApplyExpenseCalculatorOperation(decimal left, decimal right, string operation) =>
+        operation switch
+        {
+            "+" => left + right,
+            "-" => left - right,
+            "*" => left * right,
+            "/" when right == 0 => throw new DivideByZeroException("除数不能为 0"),
+            "/" => left / right,
+            _ => right
+        };
+
+    private static string FormatExpenseCalculatorValue(decimal value) =>
+        value.ToString("0.############", CultureInfo.InvariantCulture);
+
+    private static bool TryReadDecimal(string text, out decimal value) =>
+        decimal.TryParse(text, NumberStyles.Number, CultureInfo.CurrentCulture, out value) ||
+        decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out value);
 
     private static double ScaleChartValue(double value, double maximum, double availableLength)
     {
@@ -946,7 +1893,6 @@ public partial class MainWindow : Window
         MealAllowanceTextBox.Text = _settings.MealAllowanceAmount.ToString(CultureInfo.InvariantCulture);
         FlexibleStartEarliestTextBox.Text = _settings.FlexibleWorkStartEarliest;
         FlexibleStartLatestTextBox.Text = _settings.FlexibleWorkStartLatest;
-        StandardWorkSpanTextBox.Text = _settings.StandardWorkSpanHours.ToString(CultureInfo.InvariantCulture);
         WorkdayStartTextBox.Text = _settings.WorkdayOvertimeStart;
         MinimumHoursTextBox.Text = _settings.MinimumOvertimeHours.ToString(CultureInfo.InvariantCulture);
         RoundingMinutesTextBox.Text = _settings.RoundingMinutes.ToString(CultureInfo.InvariantCulture);
@@ -956,7 +1902,6 @@ public partial class MainWindow : Window
         AutoSyncCheckBox.IsChecked = _settings.AutoSyncHolidays;
         HolidaySourceTextBox.Text = _settings.HolidaySourceUrl;
         HolidaySourceDisplayTextBox.Text = _settings.HolidaySourceUrl;
-        UpdateManifestUrlTextBox.Text = _settings.UpdateManifestUrl;
     }
 
     private void ReadSettingsFromControls()
@@ -973,7 +1918,6 @@ public partial class MainWindow : Window
         if (latest < earliest) throw new ArgumentException("最晚上班时间不能早于最早上班时间");
         _settings.FlexibleWorkStartEarliest = FlexibleStartEarliestTextBox.Text.Trim();
         _settings.FlexibleWorkStartLatest = FlexibleStartLatestTextBox.Text.Trim();
-        _settings.StandardWorkSpanHours = ReadDouble(StandardWorkSpanTextBox.Text, "标准在岗跨度", false);
         _settings.WorkdayOvertimeStart = WorkdayStartTextBox.Text.Trim();
         _settings.MinimumOvertimeHours = ReadDouble(MinimumHoursTextBox.Text, "最小加班小时", true);
         _settings.RoundingMinutes = ReadDouble(RoundingMinutesTextBox.Text, "取整分钟", false);
@@ -988,14 +1932,6 @@ public partial class MainWindow : Window
             throw new ArgumentException("节假日地址必须是有效 URL，并包含 {year} 占位符");
         }
         _settings.HolidaySourceUrl = source;
-        var updateSource = UpdateManifestUrlTextBox.Text.Trim();
-        if (updateSource.Length > 0 &&
-            (!Uri.TryCreate(updateSource, UriKind.Absolute, out var updateUri) ||
-             updateUri.Scheme is not ("http" or "https")))
-        {
-            throw new ArgumentException("远程更新清单必须是有效的 HTTP 或 HTTPS 地址");
-        }
-        _settings.UpdateManifestUrl = updateSource;
     }
 
     private void CurrentMonthButton_Click(object sender, RoutedEventArgs e)
@@ -1004,7 +1940,9 @@ public partial class MainWindow : Window
     }
 
     private void PreviousMonthButton_Click(object sender, RoutedEventArgs e) =>
-        SetSelectedMonth(GetSelectedMonth().AddMonths(-1));
+        SetSelectedMonth(CanNavigatePreviousMonth()
+            ? GetSelectedMonth().AddMonths(-1)
+            : GetSelectedMonth());
 
     private void NextMonthButton_Click(object sender, RoutedEventArgs e)
     {
@@ -1012,8 +1950,16 @@ public partial class MainWindow : Window
         SetSelectedMonth(GetSelectedMonth().AddMonths(1));
     }
 
-    private void DatePicker_SelectedDateChanged(object? sender, SelectionChangedEventArgs e)
+    private void OverviewMonthComboBox_SelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
+        if (_updatingOverviewMonthSelection) return;
+        var selectedMonth = GetSelectedMonth();
+        var currentMonth = new DateOnly(DateTime.Today.Year, DateTime.Today.Month, 1);
+        if (selectedMonth > currentMonth)
+        {
+            SetSelectedMonth(currentMonth);
+            return;
+        }
         UpdateMonthNavigationButtons();
         ScheduleAutoRefresh();
     }
@@ -1031,7 +1977,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            // DatePicker 和月份按钮会连续修改起止日期，防抖后只发起一次请求。
+            // 年份、月份下拉框和月份按钮可能连续修改选择，防抖后只发起一次请求。
             await Task.Delay(350, cancellationToken);
             if (cancellationToken.IsCancellationRequested ||
                 !TryGetDateRange(out _, out _, false)) return;
@@ -1080,29 +2026,46 @@ public partial class MainWindow : Window
 
     private DateOnly GetSelectedMonth()
     {
-        var selected = StartDatePicker.SelectedDate ?? DateTime.Today;
-        return MonthNavigation.GetMonthStart(selected);
+        var today = DateTime.Today;
+        var year = OverviewYearComboBox.SelectedItem is int selectedYear ? selectedYear : today.Year;
+        var month = OverviewMonthComboBox.SelectedItem is int selectedMonth ? selectedMonth : today.Month;
+        return new DateOnly(year, month, 1);
     }
 
     private void SetSelectedMonth(DateOnly month)
     {
-        var range = MonthNavigation.GetRange(month, DateOnly.FromDateTime(DateTime.Today));
-        StartDatePicker.SelectedDate = range.Start.ToDateTime(TimeOnly.MinValue);
-        EndDatePicker.SelectedDate = range.End.ToDateTime(TimeOnly.MinValue);
+        var currentMonth = new DateOnly(DateTime.Today.Year, DateTime.Today.Month, 1);
+        var earliestMonth = new DateOnly(DateTime.Today.Year - 9, 1, 1);
+        if (month > currentMonth) month = currentMonth;
+        if (month < earliestMonth) month = earliestMonth;
+        _updatingOverviewMonthSelection = true;
+        try
+        {
+            OverviewYearComboBox.SelectedItem = month.Year;
+            OverviewMonthComboBox.SelectedItem = month.Month;
+        }
+        finally
+        {
+            _updatingOverviewMonthSelection = false;
+        }
         UpdateMonthNavigationButtons();
+        ScheduleAutoRefresh();
     }
 
     private bool CanNavigateNextMonth()
     {
-        return StartDatePicker.SelectedDate is not null &&
-               MonthNavigation.CanNavigateNext(
-                   GetSelectedMonth(),
-                   DateOnly.FromDateTime(DateTime.Today));
+        return MonthNavigation.CanNavigateNext(
+            GetSelectedMonth(),
+            DateOnly.FromDateTime(DateTime.Today));
     }
+
+    private bool CanNavigatePreviousMonth() =>
+        GetSelectedMonth() > new DateOnly(DateTime.Today.Year - 9, 1, 1);
 
     private void UpdateMonthNavigationButtons()
     {
         if (NextMonthButton is null) return;
+        PreviousMonthButton.IsEnabled = !_isBusy && CanNavigatePreviousMonth();
         NextMonthButton.IsEnabled = !_isBusy && CanNavigateNextMonth();
     }
 
@@ -1138,10 +2101,16 @@ public partial class MainWindow : Window
     private void SetBusy(bool busy, string status)
     {
         _isBusy = busy;
-        if (busy) DayDetailOverlay.Visibility = Visibility.Collapsed;
+        if (busy)
+        {
+            DayDetailOverlay.Visibility = Visibility.Collapsed;
+            ExpenseDetailOverlay.Visibility = Visibility.Collapsed;
+            CompletedGoalEditOverlay.Visibility = Visibility.Collapsed;
+            _editingCompletedGoalId = null;
+        }
         SyncHolidayButton.IsEnabled = !busy;
-        StartDatePicker.IsEnabled = !busy;
-        EndDatePicker.IsEnabled = !busy;
+        OverviewYearComboBox.IsEnabled = !busy;
+        OverviewMonthComboBox.IsEnabled = !busy;
         PreviousMonthButton.IsEnabled = !busy;
         CurrentMonthButton.IsEnabled = !busy;
         UpdateMonthNavigationButtons();
@@ -1153,25 +2122,17 @@ public partial class MainWindow : Window
 
     private bool TryGetDateRange(out DateOnly start, out DateOnly end, bool showMessage = true)
     {
-        start = default;
-        end = default;
-        if (StartDatePicker.SelectedDate is not DateTime startDate || EndDatePicker.SelectedDate is not DateTime endDate)
+        if (OverviewYearComboBox.SelectedItem is not int || OverviewMonthComboBox.SelectedItem is not int)
         {
-            if (showMessage) MessageBox.Show(this, "请选择开始和结束日期。", "日期不完整");
+            start = default;
+            end = default;
+            if (showMessage) MessageBox.Show(this, "请选择统计年份和月份。", "月份不完整");
             return false;
         }
-        start = DateOnly.FromDateTime(startDate);
-        end = DateOnly.FromDateTime(endDate);
-        if (end < start)
-        {
-            if (showMessage) MessageBox.Show(this, "结束日期不能早于开始日期。", "日期范围无效");
-            return false;
-        }
-        if (end.DayNumber - start.DayNumber > 3660)
-        {
-            if (showMessage) MessageBox.Show(this, "单次查询范围不能超过 10 年。", "日期范围过大");
-            return false;
-        }
+
+        var range = MonthNavigation.GetRange(GetSelectedMonth(), DateOnly.FromDateTime(DateTime.Today));
+        start = range.Start;
+        end = range.End;
         return true;
     }
 
@@ -1203,43 +2164,100 @@ public partial class MainWindow : Window
     private async void CheckForUpdatesMenuItem_Click(object sender, RoutedEventArgs e)
     {
         if (_isBusy) return;
-        SetBusy(true, "正在检查软件更新…");
+        var updateService = new LocalUpdateService();
+        var packages = updateService.FindPackages();
+        if (packages.Count == 0)
+        {
+            MessageBox.Show(this,
+                $"运行目录中没有符合命名规则的发布包。\n\n文件名示例：\nQHR.Overtime-v1.2.1-win-x64-Release.zip\n\n请放到：\n{updateService.InstallDirectory}",
+                "没有本地更新",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        var latestPackage = packages[0];
+        if (latestPackage.Version <= LocalUpdateService.CurrentVersion)
+        {
+            MessageBox.Show(this,
+                $"当前版本：v{LocalUpdateService.CurrentDisplayVersion}\n本地最高版本：v{latestPackage.DisplayVersion}\n\n没有更高版本可安装。",
+                "当前已是最新版本",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        var updaterLaunched = false;
+        SetBusy(true, $"发现本地版本 v{latestPackage.DisplayVersion}，正在校验并准备安装…");
         try
         {
-            var result = await new UpdateService().CheckAsync(_settings.UpdateManifestUrl);
-            if (!result.HasUpdate)
-            {
-                HeaderStatusText.Text = $"当前已是最新版本 v{UpdateService.CurrentDisplayVersion}";
-                MessageBox.Show(this,
-                    $"当前版本 v{UpdateService.CurrentDisplayVersion} 已是最新版本。",
-                    "检查更新",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information);
-                return;
-            }
-
-            var message = $"发现新版本 v{result.LatestVersion}\n当前版本 v{UpdateService.CurrentDisplayVersion}";
-            if (!string.IsNullOrWhiteSpace(result.ReleaseNotes))
-                message += $"\n\n{result.ReleaseNotes}";
-            if (string.IsNullOrWhiteSpace(result.DownloadUrl))
-            {
-                MessageBox.Show(this, message + "\n\n更新清单未提供下载地址。",
-                    "发现新版本", MessageBoxButton.OK, MessageBoxImage.Information);
-            }
-            else if (MessageBox.Show(this, message + "\n\n是否打开下载页面？",
-                         "发现新版本", MessageBoxButton.YesNo, MessageBoxImage.Information) == MessageBoxResult.Yes)
-            {
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(result.DownloadUrl)
-                {
-                    UseShellExecute = true
-                });
-            }
-            HeaderStatusText.Text = $"发现新版本 v{result.LatestVersion}";
+            await updateService.LaunchUpdaterAsync(latestPackage);
+            updaterLaunched = true;
+            HeaderStatusText.Text = "更新包校验完成，即将自动安装并重启…";
+            RefreshOverlayStatusText.Text = HeaderStatusText.Text;
+            await Task.Delay(600);
+            _isLoggingOut = true;
+            Application.Current.Shutdown();
         }
         catch (Exception ex)
         {
-            HeaderStatusText.Text = "检查更新失败";
-            MessageBox.Show(this, ex.GetBaseException().Message, "检查更新失败",
+            HeaderStatusText.Text = "本地更新安装失败";
+            MessageBox.Show(this, ex.GetBaseException().Message, "本地更新安装失败",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            if (!updaterLaunched) SetBusy(false, HeaderStatusText.Text);
+        }
+    }
+
+    private void OpenDiagnosticsMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        var window = new QhrCaptureWindow(_settings.QhrBaseUrl) { Owner = this };
+        window.Show();
+    }
+
+    private async void BackupAllDataMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isBusy) return;
+        var saveDialog = new SaveFileDialog
+        {
+            Title = "备份 QHR 加班助手全部数据",
+            Filter = "QHR 加密备份 (*.qhrbackup)|*.qhrbackup",
+            DefaultExt = ".qhrbackup",
+            AddExtension = true,
+            FileName = $"QHR-全部数据-{DateTime.Now:yyyyMMdd-HHmm}.qhrbackup"
+        };
+        if (saveDialog.ShowDialog(this) != true) return;
+        var passwordWindow = new BackupPasswordWindow(true) { Owner = this };
+        if (passwordWindow.ShowDialog() != true) return;
+
+        SetBusy(true, "正在备份全部本地数据…");
+        try
+        {
+            var progress = new Progress<string>(UpdateBackupProgress);
+            var service = new DataBackupService(_settingsService, _settings, _username);
+            var result = await service.ExportAsync(
+                saveDialog.FileName,
+                passwordWindow.BackupPassword,
+                progress);
+            HeaderStatusText.Text = $"完整备份已创建 · {DateTime.Now:HH:mm}";
+            MessageBox.Show(this,
+                $"备份完成。\n\n" +
+                $"考勤：{result.Manifest.AttendanceCount} 天\n" +
+                $"消费：{result.Manifest.ExpenseCount} 笔\n" +
+                $"证据：{result.Manifest.EvidenceDayCount} 天 / {result.Manifest.EvidenceImageCount} 张图片\n" +
+                $"大小：{FormatFileSize(result.FileSize)}\n\n" +
+                $"文件：\n{result.FilePath}\n\n" +
+                "请妥善保存备份密码。SSO 登录密码没有写入备份。",
+                "全部数据已备份",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            HeaderStatusText.Text = "备份失败";
+            MessageBox.Show(this, ex.GetBaseException().Message, "无法创建备份",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         finally
@@ -1248,10 +2266,135 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OpenDiagnosticsMenuItem_Click(object sender, RoutedEventArgs e)
+    private async void ImportBackupMenuItem_Click(object sender, RoutedEventArgs e)
     {
-        var window = new QhrCaptureWindow(_settings.QhrBaseUrl) { Owner = this };
-        window.Show();
+        if (_isBusy) return;
+        var openDialog = new OpenFileDialog
+        {
+            Title = "导入 QHR 全量备份",
+            Filter = "QHR 加密备份 (*.qhrbackup)|*.qhrbackup|所有文件 (*.*)|*.*",
+            CheckFileExists = true,
+            Multiselect = false
+        };
+        if (openDialog.ShowDialog(this) != true) return;
+        var passwordWindow = new BackupPasswordWindow(false) { Owner = this };
+        if (passwordWindow.ShowDialog() != true) return;
+
+        BackupImportPackage? package = null;
+        try
+        {
+            var service = new DataBackupService(_settingsService, _settings, _username);
+            var progress = new Progress<string>(UpdateBackupProgress);
+            SetBusy(true, "正在检查备份…");
+            package = await service.OpenAsync(openDialog.FileName, passwordWindow.BackupPassword, progress);
+            var conflicts = await service.InspectConflictsAsync(package);
+            SetBusy(false, "备份校验完成，等待确认");
+
+            if (!string.Equals(package.Manifest.Account.Trim(), _username.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                var accountResult = MessageBox.Show(this,
+                    $"此备份由账户“{package.Manifest.Account}”创建，当前登录账户是“{_username}”。\n\n" +
+                    "继续导入会把备份数据合并到当前账户。确定继续吗？",
+                    "备份账户不一致",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning);
+                if (accountResult != MessageBoxResult.Yes) return;
+            }
+
+            var conflictMode = BackupConflictMode.KeepLocal;
+            if (conflicts.TotalConflicts > 0)
+            {
+                var conflictWindow = new BackupConflictWindow(conflicts, package.Manifest) { Owner = this };
+                if (conflictWindow.ShowDialog() != true) return;
+                conflictMode = conflictWindow.SelectedMode;
+            }
+            else
+            {
+                var confirmResult = MessageBox.Show(this,
+                    $"备份创建于 {package.Manifest.CreatedAt:yyyy-MM-dd HH:mm}，未发现冲突。\n\n" +
+                    $"将合并 {package.Manifest.AttendanceCount} 天考勤、{package.Manifest.ExpenseCount} 笔消费、" +
+                    $"{package.Manifest.EvidenceImageCount} 张证据图片。\n\n确定开始导入吗？",
+                    "确认导入备份",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Question);
+                if (confirmResult != MessageBoxResult.Yes) return;
+            }
+
+            SetBusy(true, "正在导入并重新加密数据…");
+            var result = await service.ImportAsync(package, conflictMode, progress);
+            await ReloadImportedDataAsync();
+            HeaderStatusText.Text = $"备份导入完成 · {DateTime.Now:HH:mm}";
+            MessageBox.Show(this,
+                $"导入完成。所有数据已使用当前 Windows 用户重新加密。\n\n" +
+                $"本地考勤：{result.AttendanceCount} 天\n" +
+                $"消费记录：{result.ExpenseCount} 笔\n" +
+                $"证据资料：{result.EvidenceDayCount} 天 / {result.EvidenceImageCount} 张图片\n\n" +
+                "登录凭据不会从备份恢复，当前电脑仍使用自己的 Windows 凭据。",
+                "备份已导入",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            HeaderStatusText.Text = "导入备份失败";
+            MessageBox.Show(this, ex.GetBaseException().Message, "无法导入备份",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            package?.Dispose();
+            SetBusy(false, HeaderStatusText.Text);
+        }
+    }
+
+    private void UpdateBackupProgress(string message)
+    {
+        HeaderStatusText.Text = message;
+        RefreshOverlayStatusText.Text = message;
+    }
+
+    private async Task ReloadImportedDataAsync()
+    {
+        LoadSettingsIntoControls();
+        DayDetailOverlay.Visibility = Visibility.Collapsed;
+        ExpenseDetailOverlay.Visibility = Visibility.Collapsed;
+        CompletedGoalEditOverlay.Visibility = Visibility.Collapsed;
+        _openedDetailDate = null;
+        _openedExpenseDate = null;
+        _editingExpenseId = null;
+        _editingCompletedGoalId = null;
+
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        var attendanceCache = new EncryptedAttendanceCache(_settingsService, _username);
+        var allAttendance = await attendanceCache.LoadAsync();
+        if (TryGetDateRange(out var startDate, out var endDate, false))
+        {
+            _lastAttendance = allAttendance
+                .Where(item => item.Date >= startDate && item.Date <= endDate)
+                .OrderBy(item => item.Date)
+                .ToArray();
+            _lastCalendar = await _holidayService.GetCalendarAsync(
+                new DateOnly(startDate.Year, 1, 1),
+                new DateOnly(endDate.Year, 12, 31),
+                false);
+            RecalculateCurrentResults();
+        }
+
+        var analysisStart = allAttendance.Count == 0
+            ? new DateOnly(today.Year, 1, 1)
+            : new DateOnly(allAttendance.Min(item => item.Date).Year, 1, 1);
+        _analysisAttendance = allAttendance;
+        _analysisCalendar = await _holidayService.GetCalendarAsync(
+            analysisStart,
+            new DateOnly(today.Year, 12, 31),
+            false);
+        _analysisStartDate = analysisStart;
+        _analysisLoadedOn = today;
+        RecalculateAnalysisResults();
+
+        _goalLoaded = false;
+        await EnsureGoalDataAsync();
+        SettingsStatusText.Text = "设置已从备份重新载入";
     }
 
     private async void LogoutButton_Click(object sender, RoutedEventArgs e)
@@ -1332,7 +2475,6 @@ public partial class MainWindow : Window
         target.MealAllowanceAmount = source.MealAllowanceAmount;
         target.FlexibleWorkStartEarliest = source.FlexibleWorkStartEarliest;
         target.FlexibleWorkStartLatest = source.FlexibleWorkStartLatest;
-        target.StandardWorkSpanHours = source.StandardWorkSpanHours;
         target.WorkdayOvertimeStart = source.WorkdayOvertimeStart;
         target.MinimumOvertimeHours = source.MinimumOvertimeHours;
         target.RoundingMinutes = source.RoundingMinutes;
@@ -1341,7 +2483,6 @@ public partial class MainWindow : Window
         target.NonWorkdayMealAllowanceMinimumHours = source.NonWorkdayMealAllowanceMinimumHours;
         target.AutoSyncHolidays = source.AutoSyncHolidays;
         target.HolidaySourceUrl = source.HolidaySourceUrl;
-        target.UpdateManifestUrl = source.UpdateManifestUrl;
     }
 
     private static string GetDisplayName(string username)
@@ -1374,7 +2515,11 @@ public partial class MainWindow : Window
         {
             DateText = info.Date.ToString("yyyy-MM-dd");
             Name = info.Name;
-            TypeText = info.IsOffDay ? "法定休息日" : "调休工作日";
+            TypeText = !info.IsOffDay
+                ? "调休工作日"
+                : ChineseStatutoryHoliday.IsStatutory(info)
+                    ? "法定节假日"
+                    : "假期休息日（按周末）";
         }
 
         public string DateText { get; }

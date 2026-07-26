@@ -7,7 +7,10 @@ public sealed class CalendarDayCell
     public string KindText { get; init; } = string.Empty;
     public string HoursText { get; init; } = string.Empty;
     public string AmountText { get; init; } = string.Empty;
+    public string LeaveText { get; init; } = string.Empty;
     public bool HasOvertime { get; init; }
+    public bool HasLeave { get; init; }
+    public bool HasPersonalLeave { get; init; }
     public bool IsToday { get; init; }
     public bool IsHoliday { get; init; }
     public bool IsBlank => Date is null;
