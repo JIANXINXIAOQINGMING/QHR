@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -64,6 +65,8 @@ public partial class MainWindow : Window
     private string? _expenseCalculatorPendingOperator;
     private bool _expenseCalculatorEnteringNewValue = true;
     private bool _updatingOverviewMonthSelection;
+    private DateOnly? _pendingOvertimePayCapEffectiveDate;
+    private bool _overtimeCapScopeChosenSinceLoad;
 
     public MainWindow(
         string username,
@@ -211,12 +214,25 @@ public partial class MainWindow : Window
         var hours = calculated.Sum(item => item.Hours);
         var amount = calculated.Sum(item => item.OvertimePay);
         var grossOvertimePay = OvertimeCalculator.CalculateGrossOvertimePay(calculated);
+        var capDeductedPay = calculated.Sum(item => item.CapDeductedPay);
+        var capExcludedHours = calculated.Sum(item => item.CapExcludedHours);
         var mealAllowanceCount = calculated.Sum(item => item.MealAllowanceCount);
         var mealAllowanceAmount = calculated.Sum(item => item.MealAllowance);
         var days = calculated.Count(item => item.Hours > 0);
         TotalHoursText.Text = hours.ToString("0.##");
         GrossOvertimePayText.Text = $"¥ {grossOvertimePay:N2}";
         TotalAmountText.Text = $"¥ {amount:N2}";
+        var capNotEffectiveForRange = _settings.EnableOvertimePayCap &&
+                                      _settings.OvertimePayCapEffectiveDate is DateOnly capEffectiveDate &&
+                                      calculated.All(item => item.Date < capEffectiveDate);
+        CapImpactText.Text = capDeductedPay > 0
+            ? $"封顶无效 {FormatDuration(capExcludedHours)} · 少计 ¥ {capDeductedPay:N2}"
+            : capNotEffectiveForRange
+                ? $"封顶自 {_settings.OvertimePayCapEffectiveDate:yyyy-MM-dd} 起生效 · 本月不适用"
+            : _settings.EnableOvertimePayCap
+                ? $"月度封顶 ¥ {_settings.MonthlyOvertimePayCap:N2} · 本月未超额" +
+                  (_settings.ExcludeHolidayPayFromCap ? " · 节假日不占额度" : string.Empty)
+                : "未启用加班费封顶";
         OvertimeDaysText.Text = days.ToString(CultureInfo.InvariantCulture);
         AverageHoursText.Text = $"日均 {(days == 0 ? 0 : hours / days):0.##} 小时";
         MealAllowanceCountText.Text = mealAllowanceCount.ToString(CultureInfo.InvariantCulture);
@@ -277,8 +293,11 @@ public partial class MainWindow : Window
                 Date = date,
                 DayText = day.ToString(CultureInfo.InvariantCulture),
                 KindText = kindText,
-                HoursText = hasGrossOvertime ? $"加班 {record!.GrossDurationText}" : string.Empty,
-                AmountText = hasGrossOvertime ? $"加班费 ¥{record!.GrossOvertimePay:N2}" : string.Empty,
+                HoursText = hasGrossOvertime
+                    ? record!.CapExcludedHours > 0
+                        ? $"加班 {record.GrossDurationText} · 无效 {record.CapExcludedDurationText}"
+                        : $"加班 {record.GrossDurationText}"
+                    : string.Empty,
                 LeaveText = hasLeave ? record!.LeaveSummaryText : string.Empty,
                 HasOvertime = hasGrossOvertime,
                 HasLeave = hasLeave,
@@ -290,9 +309,12 @@ public partial class MainWindow : Window
 
         OvertimeCalendar.ItemsSource = cells;
         var monthRecords = recordsByDate.Values.ToArray();
+        var monthCapHours = monthRecords.Sum(item => item.CapExcludedHours);
         CalendarMonthSummaryText.Text = $"{month:yyyy 年 MM 月} · " +
                                         $"加班 {FormatDuration(monthRecords.Sum(item => item.GrossHours))} · " +
-                                        $"加班费 ¥{monthRecords.Sum(item => item.GrossOvertimePay):N2} · " +
+                                        (monthCapHours > 0
+                                            ? $"封顶无效 {FormatDuration(monthCapHours)} · "
+                                            : string.Empty) +
                                         $"餐补 {monthRecords.Sum(item => item.MealAllowanceCount)} 次";
     }
 
@@ -316,11 +338,14 @@ public partial class MainWindow : Window
             : record is null || string.IsNullOrWhiteSpace(record.LeaveSummaryText)
                 ? "无"
                 : $"{leaveSummary} · 不抵扣";
-        DayDetailActualText.Text = record?.HoursDurationText ?? "0h00m";
+        DayDetailActualText.Text = record?.PaidHoursDurationText ?? "0h00m";
+        DayDetailCapText.Text = record is null
+            ? "0h00m / ¥ 0.00"
+            : $"{record.CapExcludedDurationText} / ¥ {record.CapDeductedPay:N2}";
         DayDetailMealCountText.Text = $"{record?.MealAllowanceCount ?? 0} 次";
-        DayDetailOvertimePayText.Text = $"¥ {record?.GrossOvertimePay ?? 0m:N2}";
+        DayDetailOvertimePayText.Text = $"¥ {record?.GrossOvertimePay ?? 0m:N2} / ¥ {record?.OvertimePay ?? 0m:N2}";
         DayDetailMealPayText.Text = $"¥ {record?.MealAllowance ?? 0m:N2}";
-        DayDetailTotalText.Text = $"¥ {record?.GrossAmount ?? 0m:N2}";
+        DayDetailTotalText.Text = $"¥ {record?.GrossAmount ?? 0m:N2} / ¥ {record?.Amount ?? 0m:N2}";
         DayDetailOvertimePayText.Foreground = record?.Kind == DayKind.Holiday
             ? (Brush)FindResource("HolidayBrush")
             : (Brush)FindResource("AccentBrush");
@@ -617,10 +642,14 @@ public partial class MainWindow : Window
         builder.AppendLine($"延时工时抵扣：{record?.DelayDeductedDurationText ?? "0h00m"}");
         builder.AppendLine($"请假：{(string.IsNullOrWhiteSpace(record?.LeaveSummaryText) ? "无" : record.LeaveSummaryText)}");
         builder.AppendLine($"月度事假抵扣：{record?.LeaveDeductedDurationText ?? "0h00m"}");
-        builder.AppendLine($"实算加班：{record?.HoursDurationText ?? "0h00m"}");
-        builder.AppendLine($"加班费：¥ {record?.GrossOvertimePay ?? 0m:N2}");
+        builder.AppendLine($"封顶前加班：{record?.HoursDurationText ?? "0h00m"}");
+        builder.AppendLine($"封顶无效：{record?.CapExcludedDurationText ?? "0h00m"} / ¥ {record?.CapDeductedPay ?? 0m:N2}");
+        builder.AppendLine($"有效计费加班：{record?.PaidHoursDurationText ?? "0h00m"}");
+        builder.AppendLine($"总加班费：¥ {record?.GrossOvertimePay ?? 0m:N2}");
+        builder.AppendLine($"应计加班费（封顶前）：¥ {record?.UncappedOvertimePay ?? 0m:N2}");
+        builder.AppendLine($"实际加班费：¥ {record?.OvertimePay ?? 0m:N2}");
         builder.AppendLine($"餐补：{record?.MealAllowanceCount ?? 0} 次 / ¥ {record?.MealAllowance ?? 0m:N2}");
-        builder.AppendLine($"当天合计：¥ {record?.GrossAmount ?? 0m:N2}");
+        builder.AppendLine($"当天总合计 / 实际合计：¥ {record?.GrossAmount ?? 0m:N2} / ¥ {record?.Amount ?? 0m:N2}");
         builder.AppendLine($"导出时间：{DateTime.Now:yyyy-MM-dd HH:mm:ss}");
         return builder.ToString().TrimEnd();
     }
@@ -628,7 +657,7 @@ public partial class MainWindow : Window
     private static string BuildMonthExportCsv(IReadOnlyList<OvertimeRecord> records)
     {
         var builder = new StringBuilder();
-        builder.AppendLine("日期,日期类型,首卡,末卡,原始加班,延时工时抵扣,请假类型与时长,月度事假抵扣,实算加班,加班费,餐补次数,餐补金额,合计");
+        builder.AppendLine("日期,日期类型,首卡,末卡,原始加班,延时工时抵扣,请假类型与时长,月度事假抵扣,封顶前加班,封顶无效加班,有效计费加班,总加班费,应计加班费,封顶少计,实际加班费,餐补次数,餐补金额,总合计,实际合计");
         foreach (var record in records)
         {
             builder.AppendLine(string.Join(",",
@@ -641,10 +670,16 @@ public partial class MainWindow : Window
                 EscapeCsv(record.LeaveSummaryText),
                 EscapeCsv(record.LeaveDeductedDurationText),
                 EscapeCsv(record.HoursDurationText),
+                EscapeCsv(record.CapExcludedDurationText),
+                EscapeCsv(record.PaidHoursDurationText),
                 record.GrossOvertimePay.ToString("0.00", CultureInfo.InvariantCulture),
+                record.UncappedOvertimePay.ToString("0.00", CultureInfo.InvariantCulture),
+                record.CapDeductedPay.ToString("0.00", CultureInfo.InvariantCulture),
+                record.OvertimePay.ToString("0.00", CultureInfo.InvariantCulture),
                 record.MealAllowanceCount.ToString(CultureInfo.InvariantCulture),
                 record.MealAllowance.ToString("0.00", CultureInfo.InvariantCulture),
-                record.GrossAmount.ToString("0.00", CultureInfo.InvariantCulture)));
+                record.GrossAmount.ToString("0.00", CultureInfo.InvariantCulture),
+                record.Amount.ToString("0.00", CultureInfo.InvariantCulture)));
         }
         return builder.ToString();
     }
@@ -722,9 +757,15 @@ public partial class MainWindow : Window
         var focusYear = _analyticsRangeYears == 1 ? _analyticsSelectedYear : currentYear;
         var focusYearRecords = records.Where(item => item.Date.Year == focusYear).ToArray();
         var overtimePay = focusYearRecords.Sum(item => item.OvertimePay);
+        var grossOvertimePay = focusYearRecords.Sum(item => item.GrossOvertimePay);
+        var capExcludedHours = focusYearRecords.Sum(item => item.CapExcludedHours);
+        var capDeductedPay = focusYearRecords.Sum(item => item.CapDeductedPay);
         var mealCount = focusYearRecords.Sum(item => item.MealAllowanceCount);
         var mealAmount = focusYearRecords.Sum(item => item.MealAllowance);
         AnalyticsOvertimePayText.Text = $"¥ {overtimePay:N2}";
+        AnalyticsGrossOvertimePayText.Text = $"¥ {grossOvertimePay:N2}";
+        AnalyticsCapExcludedHoursText.Text = FormatDuration(capExcludedHours);
+        AnalyticsCapDeductedPayText.Text = $"少计 ¥ {capDeductedPay:N2}";
         AnalyticsMealCountText.Text = $"{mealCount} 次";
         AnalyticsMealAmountText.Text = $"¥ {mealAmount:N2}";
         AnalyticsTotalAmountText.Text = $"¥ {overtimePay + mealAmount:N2}";
@@ -732,10 +773,10 @@ public partial class MainWindow : Window
         var rangeText = _analyticsRangeYears == 1
             ? $"{focusYear} 年单年度分析"
             : $"{selectedYears[0]}—{selectedYears[^1]} 年（近 {_analyticsRangeYears} 年）对比";
-        AnalyticsRangeText.Text = $"{focusYear} 年 1—12 月趋势 · {rangeText} · 不受概览月份影响";
+        AnalyticsRangeText.Text = $"{focusYear} 年 1—12 月趋势 · {rangeText} · 封顶按月计算 · 不受概览月份影响";
         YearPaySubtitleText.Text = _analyticsRangeYears == 1
-            ? $"{focusYear} 年加班费规模"
-            : $"近 {_analyticsRangeYears} 年加班费规模对比";
+            ? $"{focusYear} 年实际加班费规模"
+            : $"近 {_analyticsRangeYears} 年实际加班费规模对比";
 
         var monthly = Enumerable.Range(1, 12)
             .Select(month =>
@@ -749,6 +790,7 @@ public partial class MainWindow : Window
                     WorkdayHours = monthRecords.Where(item => item.Kind == DayKind.Workday).Sum(item => item.Hours),
                     WeekendHours = monthRecords.Where(item => item.Kind == DayKind.Weekend).Sum(item => item.Hours),
                     HolidayHours = monthRecords.Where(item => item.Kind == DayKind.Holiday).Sum(item => item.Hours),
+                    CapExcludedHours = monthRecords.Sum(item => item.CapExcludedHours),
                     TotalHours = monthRecords.Sum(item => item.Hours)
                 };
             })
@@ -767,7 +809,9 @@ public partial class MainWindow : Window
         MonthlyHoursChart.ItemsSource = monthly.Select(item => new MonthlyAnalyticsPoint
         {
             Label = item.Label,
-            HoursText = FormatDuration(item.TotalHours),
+            HoursText = item.CapExcludedHours > 0
+                ? $"{FormatDuration(item.TotalHours)} / 无效 {FormatDuration(item.CapExcludedHours)}"
+                : FormatDuration(item.TotalHours),
             WorkdayHoursHeight = ScaleStackChartValue(item.WorkdayHours, maximumMonthlyHours, 150),
             WeekendHoursHeight = ScaleStackChartValue(item.WeekendHours, maximumMonthlyHours, 150),
             HolidayHoursHeight = ScaleStackChartValue(item.HolidayHours, maximumMonthlyHours, 150)
@@ -1865,11 +1909,31 @@ public partial class MainWindow : Window
         SettingsStatusText.Text = string.Empty;
         try
         {
+            var requestedCapEnabled = EnableOvertimePayCapCheckBox.IsChecked == true;
+            var requestedCap = ReadDecimal(MonthlyOvertimePayCapTextBox.Text, "每月加班费封顶金额");
+            if (requestedCapEnabled && requestedCap <= 0)
+                throw new ArgumentException("启用加班费封顶时，封顶金额必须大于 0");
+            var requestedHolidayExclusion = ExcludeHolidayPayFromCapCheckBox.IsChecked == true;
+            var capDefinitionChanged = requestedCapEnabled &&
+                                       (!_settings.EnableOvertimePayCap ||
+                                        decimal.Round(requestedCap, 2, MidpointRounding.AwayFromZero) !=
+                                        decimal.Round(_settings.MonthlyOvertimePayCap, 2, MidpointRounding.AwayFromZero) ||
+                                        requestedHolidayExclusion != _settings.ExcludeHolidayPayFromCap);
+            if (capDefinitionChanged && !_overtimeCapScopeChosenSinceLoad &&
+                !ChooseOvertimeCapEffectiveScope())
+            {
+                SettingsStatusText.Text = "已取消保存，封顶设置未更改";
+                return;
+            }
+
             ReadSettingsFromControls();
             await _settingsService.SaveAsync(_settings);
             RecalculateCurrentResults();
             if (_analysisLoadedOn is not null) RecalculateAnalysisResults();
-            SettingsStatusText.Text = "已保存并重新计算";
+            _overtimeCapScopeChosenSinceLoad = false;
+            SettingsStatusText.Text = _settings.EnableOvertimePayCap
+                ? $"已保存并重新计算 · {GetOvertimeCapScopeText(_settings.OvertimePayCapEffectiveDate)}"
+                : "已保存并重新计算";
         }
         catch (Exception ex)
         {
@@ -1885,11 +1949,43 @@ public partial class MainWindow : Window
         SettingsStatusText.Text = "已恢复默认值，点击保存后生效";
     }
 
+    private void ChooseOvertimeCapScopeButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (ChooseOvertimeCapEffectiveScope())
+            SettingsStatusText.Text = "生效范围已选择，点击保存后应用";
+    }
+
+    private bool ChooseOvertimeCapEffectiveScope()
+    {
+        var window = new OvertimeCapScopeWindow(_pendingOvertimePayCapEffectiveDate) { Owner = this };
+        if (window.ShowDialog() != true) return false;
+
+        _pendingOvertimePayCapEffectiveDate = window.EffectiveDate;
+        _overtimeCapScopeChosenSinceLoad = true;
+        UpdateOvertimeCapScopeText();
+        return true;
+    }
+
+    private void UpdateOvertimeCapScopeText()
+    {
+        OvertimeCapEffectiveScopeText.Text =
+            $"生效范围：{GetOvertimeCapScopeText(_pendingOvertimePayCapEffectiveDate)}";
+    }
+
+    private static string GetOvertimeCapScopeText(DateOnly? effectiveDate) =>
+        effectiveDate is DateOnly date ? $"{date:yyyy-MM-dd} 起" : "全部历史数据";
+
     private void LoadSettingsIntoControls()
     {
         WorkdayRateTextBox.Text = _settings.WorkdayRate.ToString(CultureInfo.InvariantCulture);
         WeekendRateTextBox.Text = _settings.WeekendRate.ToString(CultureInfo.InvariantCulture);
         HolidayRateTextBox.Text = _settings.HolidayRate.ToString(CultureInfo.InvariantCulture);
+        EnableOvertimePayCapCheckBox.IsChecked = _settings.EnableOvertimePayCap;
+        MonthlyOvertimePayCapTextBox.Text = _settings.MonthlyOvertimePayCap.ToString(CultureInfo.InvariantCulture);
+        ExcludeHolidayPayFromCapCheckBox.IsChecked = _settings.ExcludeHolidayPayFromCap;
+        _pendingOvertimePayCapEffectiveDate = _settings.OvertimePayCapEffectiveDate;
+        _overtimeCapScopeChosenSinceLoad = false;
+        UpdateOvertimeCapScopeText();
         MealAllowanceTextBox.Text = _settings.MealAllowanceAmount.ToString(CultureInfo.InvariantCulture);
         FlexibleStartEarliestTextBox.Text = _settings.FlexibleWorkStartEarliest;
         FlexibleStartLatestTextBox.Text = _settings.FlexibleWorkStartLatest;
@@ -1909,6 +2005,15 @@ public partial class MainWindow : Window
         _settings.WorkdayRate = ReadDecimal(WorkdayRateTextBox.Text, "工作日费率");
         _settings.WeekendRate = ReadDecimal(WeekendRateTextBox.Text, "周末费率");
         _settings.HolidayRate = ReadDecimal(HolidayRateTextBox.Text, "节假日费率");
+        _settings.EnableOvertimePayCap = EnableOvertimePayCapCheckBox.IsChecked == true;
+        _settings.MonthlyOvertimePayCap = decimal.Round(
+            ReadDecimal(MonthlyOvertimePayCapTextBox.Text, "每月加班费封顶金额"),
+            2,
+            MidpointRounding.AwayFromZero);
+        if (_settings.EnableOvertimePayCap && _settings.MonthlyOvertimePayCap <= 0)
+            throw new ArgumentException("启用加班费封顶时，封顶金额必须大于 0");
+        _settings.ExcludeHolidayPayFromCap = ExcludeHolidayPayFromCapCheckBox.IsChecked == true;
+        _settings.OvertimePayCapEffectiveDate = _pendingOvertimePayCapEffectiveDate;
         _settings.MealAllowanceAmount = ReadDecimal(MealAllowanceTextBox.Text, "餐补金额");
         ValidateTime(FlexibleStartEarliestTextBox.Text, "最早上班时间");
         ValidateTime(FlexibleStartLatestTextBox.Text, "最晚上班时间");
@@ -2164,34 +2269,100 @@ public partial class MainWindow : Window
     private async void CheckForUpdatesMenuItem_Click(object sender, RoutedEventArgs e)
     {
         if (_isBusy) return;
-        var updateService = new LocalUpdateService();
-        var packages = updateService.FindPackages();
-        if (packages.Count == 0)
-        {
-            MessageBox.Show(this,
-                $"运行目录中没有符合命名规则的发布包。\n\n文件名示例：\nQHR.Overtime-v1.2.1-win-x64-Release.zip\n\n请放到：\n{updateService.InstallDirectory}",
-                "没有本地更新",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
-            return;
-        }
-
-        var latestPackage = packages[0];
-        if (latestPackage.Version <= LocalUpdateService.CurrentVersion)
-        {
-            MessageBox.Show(this,
-                $"当前版本：v{LocalUpdateService.CurrentDisplayVersion}\n本地最高版本：v{latestPackage.DisplayVersion}\n\n没有更高版本可安装。",
-                "当前已是最新版本",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
-            return;
-        }
-
+        var localUpdateService = new LocalUpdateService();
+        var onlineUpdateService = new GitHubReleaseUpdateService();
         var updaterLaunched = false;
-        SetBusy(true, $"发现本地版本 v{latestPackage.DisplayVersion}，正在校验并准备安装…");
+        SetBusy(true, "正在从 GitHub Releases 检查更新…");
         try
         {
-            await updateService.LaunchUpdaterAsync(latestPackage);
+            GitHubReleaseInfo? release = null;
+            Exception? onlineError = null;
+            try
+            {
+                release = await onlineUpdateService.CheckLatestAsync();
+            }
+            catch (Exception ex)
+            {
+                onlineError = ex;
+            }
+
+            var localPackage = localUpdateService.FindPackages()
+                .FirstOrDefault(package =>
+                    package.Version > LocalUpdateService.NormalizeVersion(LocalUpdateService.CurrentVersion));
+            LocalUpdatePackage? selectedPackage = null;
+
+            if (release?.HasUpdate == true)
+            {
+                if (!release.HasDownloadableAsset)
+                {
+                    if (localPackage is not null)
+                    {
+                        selectedPackage = localPackage;
+                    }
+                    else
+                    {
+                        SetBusy(false, $"发现新版本 v{release.DisplayVersion}，但 Release 中没有安装包");
+                        var openRelease = MessageBox.Show(this,
+                            $"检测到新版本 v{release.DisplayVersion}，但 GitHub Release 中没有符合命名规则的 Windows x64 ZIP。\n\n是否打开发布页面？",
+                            "新版本缺少安装包",
+                            MessageBoxButton.YesNo,
+                            MessageBoxImage.Information);
+                        if (openRelease == MessageBoxResult.Yes) OpenWebPage(release.ReleaseUrl);
+                        return;
+                    }
+                }
+                else
+                {
+                    selectedPackage = localUpdateService.FindPackages()
+                        .FirstOrDefault(package => package.Version == release.Version);
+                    if (selectedPackage is null)
+                    {
+                        SetBusy(false, $"发现新版本 v{release.DisplayVersion}");
+                        var packageName = release.AssetName ?? "QHR Windows x64 ZIP";
+                        var confirm = MessageBox.Show(this,
+                            $"检测到新版本。\n\n当前版本：v{LocalUpdateService.CurrentDisplayVersion}\n最新版本：v{release.DisplayVersion}\n安装包：{packageName}\n大小：{FormatByteSize(release.AssetSizeBytes)}\n\n是否现在下载并自动更新？",
+                            "检测到新版本",
+                            MessageBoxButton.YesNo,
+                            MessageBoxImage.Question);
+                        if (confirm != MessageBoxResult.Yes) return;
+
+                        SetBusy(true, $"正在下载 v{release.DisplayVersion}…");
+                        var progress = new Progress<UpdateDownloadProgress>(value =>
+                        {
+                            var progressText = value.TotalBytes > 0
+                                ? $"正在下载 v{release.DisplayVersion}：{FormatByteSize(value.BytesReceived)} / {FormatByteSize(value.TotalBytes)}（{value.Percent:0.0}%）"
+                                : $"正在下载 v{release.DisplayVersion}：已接收 {FormatByteSize(value.BytesReceived)}";
+                            HeaderStatusText.Text = progressText;
+                            RefreshOverlayStatusText.Text = progressText;
+                        });
+                        selectedPackage = await onlineUpdateService.DownloadAsync(release, progress);
+                    }
+                }
+            }
+            else if (localPackage is not null)
+            {
+                selectedPackage = localPackage;
+            }
+            else
+            {
+                if (onlineError is not null)
+                {
+                    throw new InvalidOperationException(
+                        $"在线更新检查失败，安装目录中也没有可用的本地更新包。\n{onlineError.GetBaseException().Message}",
+                        onlineError);
+                }
+
+                SetBusy(false, $"当前已是最新版本 v{LocalUpdateService.CurrentDisplayVersion}");
+                MessageBox.Show(this,
+                    $"当前已是最新版本：v{LocalUpdateService.CurrentDisplayVersion}",
+                    "当前已是最新版本",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
+
+            SetBusy(true, $"正在校验 v{selectedPackage.DisplayVersion} 并准备安装…");
+            await localUpdateService.LaunchUpdaterAsync(selectedPackage);
             updaterLaunched = true;
             HeaderStatusText.Text = "更新包校验完成，即将自动安装并重启…";
             RefreshOverlayStatusText.Text = HeaderStatusText.Text;
@@ -2201,14 +2372,36 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            HeaderStatusText.Text = "本地更新安装失败";
-            MessageBox.Show(this, ex.GetBaseException().Message, "本地更新安装失败",
+            HeaderStatusText.Text = "检查或安装更新失败";
+            MessageBox.Show(this, ex.GetBaseException().Message, "更新失败",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         finally
         {
             if (!updaterLaunched) SetBusy(false, HeaderStatusText.Text);
         }
+    }
+
+    private static string FormatByteSize(long bytes)
+    {
+        if (bytes <= 0) return "未知";
+        string[] units = ["B", "KB", "MB", "GB"];
+        var value = (double)bytes;
+        var unitIndex = 0;
+        while (value >= 1024 && unitIndex < units.Length - 1)
+        {
+            value /= 1024;
+            unitIndex++;
+        }
+
+        return unitIndex == 0
+            ? $"{bytes} {units[unitIndex]}"
+            : $"{value:0.##} {units[unitIndex]}";
+    }
+
+    private static void OpenWebPage(string url)
+    {
+        Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
     }
 
     private void OpenDiagnosticsMenuItem_Click(object sender, RoutedEventArgs e)
@@ -2472,6 +2665,10 @@ public partial class MainWindow : Window
         target.WorkdayRate = source.WorkdayRate;
         target.WeekendRate = source.WeekendRate;
         target.HolidayRate = source.HolidayRate;
+        target.EnableOvertimePayCap = source.EnableOvertimePayCap;
+        target.MonthlyOvertimePayCap = source.MonthlyOvertimePayCap;
+        target.ExcludeHolidayPayFromCap = source.ExcludeHolidayPayFromCap;
+        target.OvertimePayCapEffectiveDate = source.OvertimePayCapEffectiveDate;
         target.MealAllowanceAmount = source.MealAllowanceAmount;
         target.FlexibleWorkStartEarliest = source.FlexibleWorkStartEarliest;
         target.FlexibleWorkStartLatest = source.FlexibleWorkStartLatest;

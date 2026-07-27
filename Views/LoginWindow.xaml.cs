@@ -26,6 +26,7 @@ public partial class LoginWindow : Window
         RememberUsernameCheckBox.IsChecked = _settings.AutoLoginEnabled;
         Loaded += LoginWindow_Loaded;
         Closed += LoginWindow_Closed;
+        Activated += (_, _) => UpdateCapsLockWarning();
     }
 
     private bool IsTokenMode =>
@@ -144,6 +145,7 @@ public partial class LoginWindow : Window
             ? "Token 仅保存在当前进程，不会写入磁盘"
             : "直连 SSO，仅用于获取当前会话 token";
         SecretPasswordBox.Clear();
+        UpdateCapsLockWarning();
     }
 
     private async void SecretPasswordBox_KeyDown(object sender, KeyEventArgs e)
@@ -151,6 +153,22 @@ public partial class LoginWindow : Window
         if (e.Key != Key.Enter || !LoginButton.IsEnabled) return;
         e.Handled = true;
         await LoginAsync(false);
+    }
+
+    private void SecretPasswordBox_KeyUp(object sender, KeyEventArgs e) => UpdateCapsLockWarning();
+
+    private void SecretPasswordBox_GotKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e) =>
+        UpdateCapsLockWarning();
+
+    private void SecretPasswordBox_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e) =>
+        UpdateCapsLockWarning();
+
+    private void UpdateCapsLockWarning()
+    {
+        var shouldShow = !IsTokenMode &&
+                         SecretPasswordBox.IsKeyboardFocusWithin &&
+                         Keyboard.IsKeyToggled(Key.CapsLock);
+        CapsLockWarningBorder.Visibility = shouldShow ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void Window_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)

@@ -82,6 +82,14 @@ public sealed class SettingsService
             // 分钟也参与计费：最小加班门槛只影响旧版本，餐补仍使用独立的 1h/4h 门槛。
             settings.MinimumOvertimeHours = 0;
         }
-        settings.SettingsVersion = 5;
+        if (settings.SettingsVersion < 6)
+        {
+            // 旧配置默认不启用封顶，避免升级后改变任何历史计算结果。
+            settings.EnableOvertimePayCap = false;
+            settings.MonthlyOvertimePayCap = 2000m;
+            settings.ExcludeHolidayPayFromCap = true;
+            settings.OvertimePayCapEffectiveDate = null;
+        }
+        settings.SettingsVersion = 6;
     }
 }

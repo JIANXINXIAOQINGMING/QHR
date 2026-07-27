@@ -69,7 +69,17 @@
                         </StackPanel>
 
                         <TextBlock x:Name="SecretLabel" Text="密码" FontWeight="SemiBold" Margin="0,18,0,7" />
-                        <PasswordBox x:Name="SecretPasswordBox" Height="42" KeyDown="SecretPasswordBox_KeyDown" />
+                        <PasswordBox x:Name="SecretPasswordBox" Height="42"
+                                     KeyDown="SecretPasswordBox_KeyDown"
+                                     KeyUp="SecretPasswordBox_KeyUp"
+                                     GotKeyboardFocus="SecretPasswordBox_GotKeyboardFocus"
+                                     LostKeyboardFocus="SecretPasswordBox_LostKeyboardFocus" />
+                        <Border x:Name="CapsLockWarningBorder" Visibility="Collapsed"
+                                Background="#18F5A623" BorderBrush="#70F5A623" BorderThickness="1"
+                                CornerRadius="8" Padding="9,6" Margin="0,7,0,0">
+                            <TextBlock Text="⇧ 大写锁定已开启，请注意密码大小写"
+                                       Foreground="{StaticResource WarningBrush}" FontWeight="SemiBold" />
+                        </Border>
 
                         <CheckBox x:Name="RememberUsernameCheckBox" Content="自动登录（使用 Windows 凭据管理器）"
                                   IsChecked="True" Margin="0,15,0,0" />

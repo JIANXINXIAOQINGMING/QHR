@@ -54,7 +54,7 @@
                                 <MenuItem Header="备份全部数据" Click="BackupAllDataMenuItem_Click" />
                                 <MenuItem Header="导入备份" Click="ImportBackupMenuItem_Click" />
                                 <Separator />
-                                <MenuItem x:Name="VersionMenuItem" Header="版本 v1.3.16" IsEnabled="False" />
+                                <MenuItem x:Name="VersionMenuItem" Header="版本 v1.3.19" IsEnabled="False" />
                                 <MenuItem Header="退出登录" Foreground="{StaticResource DangerBrush}" Click="LogoutButton_Click" />
                             </ContextMenu>
                         </Button.ContextMenu>
@@ -190,6 +190,9 @@
                                                                Foreground="{StaticResource AccentBrush}" />
                                                 </StackPanel>
                                             </Grid>
+                                            <TextBlock x:Name="CapImpactText" Text="未启用加班费封顶"
+                                                       Style="{StaticResource MutedTextStyle}" FontSize="11"
+                                                       Margin="0,4,0,0" TextWrapping="Wrap" />
                                         </StackPanel>
                                     </Border>
                                     <Border Grid.Column="2" Style="{StaticResource GlassCardStyle}" Padding="12" Margin="0,0,12,0">
@@ -249,7 +252,7 @@
                                             </ItemsControl.ItemsPanel>
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate>
-                                                    <Border Margin="4" Padding="10,8" MinHeight="84" CornerRadius="11"
+                                                    <Border Margin="4" Padding="10,8" MinHeight="96" CornerRadius="11"
                                                             Cursor="Hand" MouseLeftButtonUp="CalendarDay_MouseLeftButtonUp">
                                                         <Border.Style>
                                                             <Style TargetType="Border">
@@ -277,7 +280,6 @@
                                                         </Border.Style>
                                                         <Grid>
                                                             <Grid.RowDefinitions>
-                                                                <RowDefinition Height="Auto" />
                                                                 <RowDefinition Height="Auto" />
                                                                 <RowDefinition Height="Auto" />
                                                                 <RowDefinition Height="Auto" />
@@ -313,19 +315,6 @@
                                                             </TextBlock>
                                                             <TextBlock Grid.Row="2" Text="{Binding HoursText}" FontSize="12" FontWeight="SemiBold"
                                                                        Foreground="{StaticResource AccentBrush}" Margin="0,3,0,1" />
-                                                            <TextBlock Grid.Row="3" Text="{Binding AmountText}" FontSize="11">
-                                                                <TextBlock.Style>
-                                                                    <Style TargetType="TextBlock">
-                                                                        <Setter Property="Foreground" Value="{StaticResource SuccessBrush}" />
-                                                                        <Style.Triggers>
-                                                                            <DataTrigger Binding="{Binding IsHoliday}" Value="True">
-                                                                                <Setter Property="Foreground" Value="{StaticResource HolidayBrush}" />
-                                                                                <Setter Property="FontWeight" Value="SemiBold" />
-                                                                            </DataTrigger>
-                                                                        </Style.Triggers>
-                                                                    </Style>
-                                                                </TextBlock.Style>
-                                                            </TextBlock>
                                                         </Grid>
                                                     </Border>
                                                 </DataTemplate>
@@ -363,12 +352,26 @@
                                     </Border>
                                 </Grid>
 
-                                <UniformGrid Columns="4" Margin="0,0,0,16">
+                                <UniformGrid Columns="5" Margin="0,0,0,16">
                                     <Border Style="{StaticResource GlassCardStyle}" Padding="18" Margin="0,0,12,0">
                                         <StackPanel>
-                                            <TextBlock Text="加班费" Style="{StaticResource MutedTextStyle}" />
-                                            <TextBlock x:Name="AnalyticsOvertimePayText" Text="¥ 0.00" FontSize="25" FontWeight="SemiBold"
-                                                       Foreground="{StaticResource AccentBrush}" Margin="0,10,0,0" />
+                                            <TextBlock Text="加班费（实际 / 总）" Style="{StaticResource MutedTextStyle}" />
+                                            <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                                <TextBlock x:Name="AnalyticsOvertimePayText" Text="¥ 0.00" FontSize="21" FontWeight="SemiBold"
+                                                           Foreground="{StaticResource SuccessBrush}" />
+                                                <TextBlock Text=" / " FontSize="19" Foreground="{StaticResource MutedBrush}" />
+                                                <TextBlock x:Name="AnalyticsGrossOvertimePayText" Text="¥ 0.00" FontSize="21" FontWeight="SemiBold"
+                                                           Foreground="{StaticResource AccentBrush}" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource GlassCardStyle}" Padding="18" Margin="0,0,12,0">
+                                        <StackPanel>
+                                            <TextBlock Text="封顶无效" Style="{StaticResource MutedTextStyle}" />
+                                            <TextBlock x:Name="AnalyticsCapExcludedHoursText" Text="0h00m" FontSize="23" FontWeight="SemiBold"
+                                                       Foreground="{StaticResource DangerBrush}" Margin="0,10,0,0" />
+                                            <TextBlock x:Name="AnalyticsCapDeductedPayText" Text="少计 ¥ 0.00"
+                                                       Style="{StaticResource MutedTextStyle}" FontSize="11" Margin="0,4,0,0" />
                                         </StackPanel>
                                     </Border>
                                     <Border Style="{StaticResource GlassCardStyle}" Padding="18" Margin="0,0,12,0">
@@ -403,7 +406,7 @@
                                             <TextBlock Text="月度费用与餐补" Style="{StaticResource SectionTitleStyle}" />
                                             <StackPanel Orientation="Horizontal" Margin="0,5,0,12">
                                                 <Border Width="10" Height="10" CornerRadius="3" Background="{StaticResource AccentBrush}" Margin="0,2,5,0" />
-                                                <TextBlock Text="加班费（元）" Style="{StaticResource MutedTextStyle}" Margin="0,0,15,0" />
+                                                <TextBlock Text="实际加班费（元）" Style="{StaticResource MutedTextStyle}" Margin="0,0,15,0" />
                                                 <Border Width="10" Height="10" CornerRadius="3" Background="{StaticResource SuccessBrush}" Margin="0,2,5,0" />
                                                 <TextBlock Text="餐补（次）· 双轴独立缩放" Style="{StaticResource MutedTextStyle}" />
                                             </StackPanel>
@@ -536,7 +539,13 @@
                                                                     ElementStyle="{StaticResource CenteredDataGridTextStyle}" />
                                                 <DataGridTextColumn Header="延时抵扣(h)" Binding="{Binding DelayDeductedHours, StringFormat=0.##}" Width="110"
                                                                     ElementStyle="{StaticResource CenteredDataGridTextStyle}" />
-                                                <DataGridTextColumn Header="加班费" Binding="{Binding OvertimePay, StringFormat=¥ {0:N2}}" Width="115"
+                                                <DataGridTextColumn Header="总加班费" Binding="{Binding GrossOvertimePay, StringFormat=¥ {0:N2}}" Width="115"
+                                                                    ElementStyle="{StaticResource CenteredDataGridTextStyle}" />
+                                                <DataGridTextColumn Header="实际加班费" Binding="{Binding OvertimePay, StringFormat=¥ {0:N2}}" Width="120"
+                                                                    ElementStyle="{StaticResource CenteredDataGridTextStyle}" />
+                                                <DataGridTextColumn Header="封顶无效(h)" Binding="{Binding CapExcludedHours, StringFormat=0.##}" Width="115"
+                                                                    ElementStyle="{StaticResource CenteredDataGridTextStyle}" />
+                                                <DataGridTextColumn Header="封顶少计" Binding="{Binding CapDeductedPay, StringFormat=¥ {0:N2}}" Width="110"
                                                                     ElementStyle="{StaticResource CenteredDataGridTextStyle}" />
                                                 <DataGridTextColumn Header="餐补次数" Binding="{Binding MealAllowanceCount}" Width="95"
                                                                     ElementStyle="{StaticResource CenteredDataGridTextStyle}" />
@@ -600,9 +609,13 @@
                                                                     ElementStyle="{StaticResource CenteredDataGridTextStyle}" />
                                                 <DataGridTextColumn Header="月度事假抵扣" Binding="{Binding LeaveDeductedDurationText}" Width="125"
                                                                     ElementStyle="{StaticResource CenteredDataGridTextStyle}" />
-                                                <DataGridTextColumn Header="实算加班" Binding="{Binding HoursDurationText}" Width="100"
+                                                <DataGridTextColumn Header="封顶前加班" Binding="{Binding HoursDurationText}" Width="105"
                                                                     ElementStyle="{StaticResource CenteredDataGridTextStyle}" />
-                                                <DataGridTextColumn Header="加班费" Binding="{Binding GrossOvertimePay, StringFormat=¥ {0:N2}}" Width="105">
+                                                <DataGridTextColumn Header="封顶无效" Binding="{Binding CapExcludedDurationText}" Width="100"
+                                                                    ElementStyle="{StaticResource CenteredDataGridTextStyle}" />
+                                                <DataGridTextColumn Header="有效计费" Binding="{Binding PaidHoursDurationText}" Width="100"
+                                                                    ElementStyle="{StaticResource CenteredDataGridTextStyle}" />
+                                                <DataGridTextColumn Header="总加班费" Binding="{Binding GrossOvertimePay, StringFormat=¥ {0:N2}}" Width="105">
                                                     <DataGridTextColumn.ElementStyle>
                                                         <Style TargetType="TextBlock" BasedOn="{StaticResource CenteredDataGridTextStyle}">
                                                             <Style.Triggers>
@@ -614,9 +627,13 @@
                                                         </Style>
                                                     </DataGridTextColumn.ElementStyle>
                                                 </DataGridTextColumn>
+                                                <DataGridTextColumn Header="实际加班费" Binding="{Binding OvertimePay, StringFormat=¥ {0:N2}}" Width="110"
+                                                                    ElementStyle="{StaticResource CenteredDataGridTextStyle}" />
                                                 <DataGridTextColumn Header="餐补" Binding="{Binding MealAllowance, StringFormat=¥ {0:N2}}" Width="90"
                                                                     ElementStyle="{StaticResource CenteredDataGridTextStyle}" />
-                                                <DataGridTextColumn Header="合计" Binding="{Binding GrossAmount, StringFormat=¥ {0:N2}}" Width="105"
+                                                <DataGridTextColumn Header="总合计" Binding="{Binding GrossAmount, StringFormat=¥ {0:N2}}" Width="105"
+                                                                    ElementStyle="{StaticResource CenteredDataGridTextStyle}" />
+                                                <DataGridTextColumn Header="实际合计" Binding="{Binding Amount, StringFormat=¥ {0:N2}}" Width="105"
                                                                     ElementStyle="{StaticResource CenteredDataGridTextStyle}" />
                                             </DataGrid.Columns>
                                         </DataGrid>
@@ -635,7 +652,10 @@
                                                 <DataGridTextColumn Header="事假(h)" Binding="{Binding PersonalLeaveHours, StringFormat=0.##}" Width="95" />
                                                 <DataGridTextColumn Header="年假(h)" Binding="{Binding AnnualLeaveHours, StringFormat=0.##}" Width="95" />
                                                 <DataGridTextColumn Header="事假抵扣(h)" Binding="{Binding LeaveDeductedHours, StringFormat=0.##}" Width="110" />
-                                                <DataGridTextColumn Header="加班费" Binding="{Binding OvertimePay, StringFormat=¥ {0:N2}}" Width="115" />
+                                                <DataGridTextColumn Header="封顶无效(h)" Binding="{Binding CapExcludedHours, StringFormat=0.##}" Width="115" />
+                                                <DataGridTextColumn Header="总加班费" Binding="{Binding GrossOvertimePay, StringFormat=¥ {0:N2}}" Width="115" />
+                                                <DataGridTextColumn Header="实际加班费" Binding="{Binding OvertimePay, StringFormat=¥ {0:N2}}" Width="120" />
+                                                <DataGridTextColumn Header="封顶少计" Binding="{Binding CapDeductedPay, StringFormat=¥ {0:N2}}" Width="110" />
                                                 <DataGridTextColumn Header="餐补次数" Binding="{Binding MealAllowanceCount}" Width="100" />
                                                 <DataGridTextColumn Header="餐补" Binding="{Binding MealAllowance, StringFormat=¥ {0:N2}}" Width="100" />
                                                 <DataGridTextColumn Header="总计" Binding="{Binding TotalAmount, StringFormat=¥ {0:N2}}" Width="120" />
@@ -656,7 +676,10 @@
                                                 <DataGridTextColumn Header="事假(h)" Binding="{Binding PersonalLeaveHours, StringFormat=0.##}" Width="100" />
                                                 <DataGridTextColumn Header="年假(h)" Binding="{Binding AnnualLeaveHours, StringFormat=0.##}" Width="100" />
                                                 <DataGridTextColumn Header="事假抵扣(h)" Binding="{Binding LeaveDeductedHours, StringFormat=0.##}" Width="115" />
-                                                <DataGridTextColumn Header="加班费" Binding="{Binding OvertimePay, StringFormat=¥ {0:N2}}" Width="120" />
+                                                <DataGridTextColumn Header="封顶无效(h)" Binding="{Binding CapExcludedHours, StringFormat=0.##}" Width="120" />
+                                                <DataGridTextColumn Header="总加班费" Binding="{Binding GrossOvertimePay, StringFormat=¥ {0:N2}}" Width="120" />
+                                                <DataGridTextColumn Header="实际加班费" Binding="{Binding OvertimePay, StringFormat=¥ {0:N2}}" Width="125" />
+                                                <DataGridTextColumn Header="封顶少计" Binding="{Binding CapDeductedPay, StringFormat=¥ {0:N2}}" Width="115" />
                                                 <DataGridTextColumn Header="餐补次数" Binding="{Binding MealAllowanceCount}" Width="105" />
                                                 <DataGridTextColumn Header="餐补" Binding="{Binding MealAllowance, StringFormat=¥ {0:N2}}" Width="105" />
                                                 <DataGridTextColumn Header="总计" Binding="{Binding TotalAmount, StringFormat=¥ {0:N2}}" Width="125" />
@@ -713,7 +736,7 @@
                         <ScrollViewer VerticalScrollBarVisibility="Auto">
                             <StackPanel Margin="8,5,8,18">
                                 <TextBlock Text="计算设置" Style="{StaticResource PageTitleStyle}" />
-                                <TextBlock Text="费率、弹性班次、请假抵扣、餐补和取整规则修改后会立即重算当前结果。"
+                                <TextBlock Text="费率、月度封顶、生效范围、请假抵扣、餐补和取整规则修改后会立即重算当前结果。"
                                            Style="{StaticResource MutedTextStyle}" Margin="0,7,0,18" />
 
                                 <Border Style="{StaticResource GlassCardStyle}" Padding="22" Margin="0,0,0,16">
@@ -725,6 +748,40 @@
                                             <StackPanel Margin="0,0,14,0"><TextBlock Text="节假日（元 / 小时）" Margin="0,0,0,7" /><TextBox x:Name="HolidayRateTextBox" /></StackPanel>
                                             <StackPanel><TextBlock Text="每次餐补（元）" Margin="0,0,0,7" /><TextBox x:Name="MealAllowanceTextBox" /></StackPanel>
                                         </UniformGrid>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Style="{StaticResource GlassCardStyle}" Padding="22" Margin="0,0,0,16">
+                                    <StackPanel>
+                                        <TextBlock Text="月度加班费封顶" Style="{StaticResource SectionTitleStyle}" />
+                                        <TextBlock Text="超过封顶额度的部分不计发加班费，并记录为封顶无效加班时长。餐补不占用封顶额度。"
+                                                   Style="{StaticResource MutedTextStyle}" Margin="0,7,0,16" TextWrapping="Wrap" />
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="190" />
+                                                <ColumnDefinition Width="220" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <CheckBox x:Name="EnableOvertimePayCapCheckBox" Content="启用月度封顶"
+                                                      VerticalAlignment="Center" />
+                                            <StackPanel Grid.Column="1" Margin="0,0,22,0">
+                                                <TextBlock Text="每月封顶金额（元）" Margin="0,0,0,7" />
+                                                <TextBox x:Name="MonthlyOvertimePayCapTextBox"
+                                                         IsEnabled="{Binding IsChecked, ElementName=EnableOvertimePayCapCheckBox}" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                                                <CheckBox x:Name="ExcludeHolidayPayFromCapCheckBox"
+                                                          Content="节假日加班费不计入封顶额度"
+                                                          IsEnabled="{Binding IsChecked, ElementName=EnableOvertimePayCapCheckBox}" />
+                                                <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                                    <TextBlock x:Name="OvertimeCapEffectiveScopeText" Text="生效范围：全部历史数据"
+                                                               Style="{StaticResource MutedTextStyle}" VerticalAlignment="Center" />
+                                                    <Button Content="选择生效范围" Padding="12,6" Margin="14,0,0,0"
+                                                            IsEnabled="{Binding IsChecked, ElementName=EnableOvertimePayCapCheckBox}"
+                                                            Click="ChooseOvertimeCapScopeButton_Click" />
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </Grid>
                                     </StackPanel>
                                 </Border>
 
@@ -1073,7 +1130,7 @@
                                 <StackPanel><TextBlock Text="末卡" Style="{StaticResource MutedTextStyle}" /><TextBlock x:Name="DayDetailClockOutText" Text="--:--" FontSize="18" FontWeight="SemiBold" Margin="0,7,0,0" /></StackPanel>
                             </Border>
                             <Border Background="#58FFFFFF" CornerRadius="12" Padding="15" Margin="0,0,9,0">
-                                <StackPanel><TextBlock Text="实算加班" Style="{StaticResource MutedTextStyle}" /><TextBlock x:Name="DayDetailActualText" Text="0h00m" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" Margin="0,7,0,0" /></StackPanel>
+                                <StackPanel><TextBlock Text="有效计费加班" Style="{StaticResource MutedTextStyle}" /><TextBlock x:Name="DayDetailActualText" Text="0h00m" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" Margin="0,7,0,0" /></StackPanel>
                             </Border>
                             <Border Background="#58FFFFFF" CornerRadius="12" Padding="15">
                                 <StackPanel><TextBlock Text="餐补次数" Style="{StaticResource MutedTextStyle}" /><TextBlock x:Name="DayDetailMealCountText" Text="0 次" FontSize="18" FontWeight="SemiBold" Margin="0,7,0,0" /></StackPanel>
@@ -1084,7 +1141,7 @@
                                 BorderThickness="1" CornerRadius="12" Padding="17,14" Margin="0,0,0,16">
                             <Grid>
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions><RowDefinition /><RowDefinition /><RowDefinition /></Grid.RowDefinitions>
+                                <Grid.RowDefinitions><RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition /></Grid.RowDefinitions>
                                 <TextBlock Text="原始加班" Margin="0,4" />
                                 <TextBlock x:Name="DayDetailGrossText" Grid.Column="1" Text="0h00m" FontWeight="SemiBold" Margin="0,4" />
                                 <TextBlock Grid.Row="1" Text="延时工时抵扣" Margin="0,4" />
@@ -1092,12 +1149,16 @@
                                 <TextBlock Grid.Row="2" Text="请假 / 月度抵扣" Margin="0,4" />
                                 <TextBlock x:Name="DayDetailLeaveText" Grid.Row="2" Grid.Column="1" Text="无" FontWeight="SemiBold"
                                            Margin="22,4,0,4" TextAlignment="Right" TextWrapping="Wrap" />
+                                <TextBlock Grid.Row="3" Text="封顶无效" Margin="0,4" />
+                                <TextBlock x:Name="DayDetailCapText" Grid.Row="3" Grid.Column="1" Text="0h00m / ¥ 0.00"
+                                           FontWeight="SemiBold" Margin="22,4,0,4" TextAlignment="Right"
+                                           Foreground="{StaticResource DangerBrush}" />
                             </Grid>
                         </Border>
 
                         <UniformGrid Grid.Row="3" Columns="3">
                             <StackPanel>
-                                <TextBlock Text="加班费" Style="{StaticResource MutedTextStyle}" />
+                                <TextBlock Text="加班费（总 / 实际）" Style="{StaticResource MutedTextStyle}" />
                                 <TextBlock x:Name="DayDetailOvertimePayText" Text="¥ 0.00" FontSize="19" FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" Margin="0,6,0,0" />
                             </StackPanel>
                             <StackPanel>
@@ -1105,7 +1166,7 @@
                                 <TextBlock x:Name="DayDetailMealPayText" Text="¥ 0.00" FontSize="19" FontWeight="SemiBold" Foreground="{StaticResource SuccessBrush}" Margin="0,6,0,0" />
                             </StackPanel>
                             <StackPanel HorizontalAlignment="Right">
-                                <TextBlock Text="当天合计" Style="{StaticResource MutedTextStyle}" HorizontalAlignment="Right" />
+                                <TextBlock Text="当天合计（总 / 实际）" Style="{StaticResource MutedTextStyle}" HorizontalAlignment="Right" />
                                 <TextBlock x:Name="DayDetailTotalText" Text="¥ 0.00" FontSize="21" FontWeight="SemiBold" HorizontalAlignment="Right" Margin="0,6,0,0" />
                             </StackPanel>
                         </UniformGrid>

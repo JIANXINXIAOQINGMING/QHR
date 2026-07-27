@@ -42,10 +42,20 @@ public sealed class OvertimeRecord
     public string LeaveDeductedDurationText => FormatDuration(LeaveDeductedHours);
     public double Hours { get; set; }
     public string HoursDurationText => FormatDuration(Hours);
+    public decimal UncappedOvertimePay { get; set; }
     public decimal OvertimePay { get; set; }
+    public decimal CapDeductedPay { get; set; }
+    public double CapExcludedHours { get; set; }
+    public string CapExcludedDurationText => FormatDuration(CapExcludedHours);
+    public double PaidHours => Math.Round(
+        Math.Max(0, Hours) - Math.Max(0, CapExcludedHours),
+        6,
+        MidpointRounding.AwayFromZero);
+    public string PaidHoursDurationText => FormatDuration(PaidHours);
     public decimal MealAllowance { get; set; }
     public int MealAllowanceCount { get; init; }
     public decimal GrossAmount => GrossOvertimePay + MealAllowance;
+    public decimal UncappedAmount => UncappedOvertimePay + MealAllowance;
     public decimal Amount { get; set; }
     public string SourceDescription { get; set; } = string.Empty;
 

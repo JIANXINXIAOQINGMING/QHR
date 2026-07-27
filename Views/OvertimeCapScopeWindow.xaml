@@ -1,0 +1,57 @@
+<Window x:Class="QHR.Views.OvertimeCapScopeWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="选择封顶生效范围" Width="560" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" WindowStyle="None" ResizeMode="NoResize"
+        AllowsTransparency="True" Background="Transparent" ShowInTaskbar="False">
+    <Border Margin="14" Padding="26" CornerRadius="18" Background="{StaticResource WindowBackgroundBrush}"
+            BorderBrush="#CFFFFFFF" BorderThickness="1" Effect="{StaticResource PanelShadow}">
+        <StackPanel>
+            <Grid MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+                <StackPanel>
+                    <TextBlock Text="加班费封顶从什么时候生效？" FontSize="22" FontWeight="SemiBold" />
+                    <TextBlock Text="此选择只改变封顶规则，不会修改或删除原始考勤数据。"
+                               Style="{StaticResource MutedTextStyle}" Margin="0,7,0,0" />
+                </StackPanel>
+                <Button Content="×" Width="32" Height="32" Padding="0" HorizontalAlignment="Right"
+                        VerticalAlignment="Top" Background="Transparent" BorderThickness="0" Effect="{x:Null}"
+                        FontSize="21" Click="CancelButton_Click" />
+            </Grid>
+
+            <Border Margin="0,20,0,12" Padding="15,13" CornerRadius="12"
+                    Background="#171473E6" BorderBrush="#381473E6" BorderThickness="1">
+                <RadioButton x:Name="AllHistoryRadioButton" GroupName="CapScope" IsChecked="True"
+                             Checked="ScopeRadioButton_Checked">
+                    <StackPanel Margin="5,0,0,0">
+                        <TextBlock Text="应用到全部历史数据" FontWeight="SemiBold" />
+                        <TextBlock Text="所有已保存月份都会按新的月度封顶规则重新计算"
+                                   Style="{StaticResource MutedTextStyle}" Margin="0,4,0,0" />
+                    </StackPanel>
+                </RadioButton>
+            </Border>
+
+            <Border Padding="15,13" CornerRadius="12" Background="#42FFFFFF"
+                    BorderBrush="{StaticResource LineBrush}" BorderThickness="1">
+                <StackPanel>
+                    <RadioButton x:Name="FromDateRadioButton" GroupName="CapScope" Checked="ScopeRadioButton_Checked">
+                        <StackPanel Margin="5,0,0,0">
+                            <TextBlock Text="从指定日期起生效" FontWeight="SemiBold" />
+                            <TextBlock Text="该日期之前的数据保持不受封顶限制"
+                                       Style="{StaticResource MutedTextStyle}" Margin="0,4,0,0" />
+                        </StackPanel>
+                    </RadioButton>
+                    <DatePicker x:Name="EffectiveDatePicker" Width="210" HorizontalAlignment="Left"
+                                Margin="29,13,0,0" IsEnabled="False" />
+                </StackPanel>
+            </Border>
+
+            <TextBlock x:Name="ErrorText" Foreground="{StaticResource DangerBrush}" Margin="2,12,0,0"
+                       TextWrapping="Wrap" />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
+                <Button Content="取消" Padding="18,8" Margin="0,0,9,0" Click="CancelButton_Click" />
+                <Button Content="确认生效范围" Padding="18,8" Style="{StaticResource AccentButtonStyle}"
+                        Click="ConfirmButton_Click" />
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</Window>

@@ -29,12 +29,17 @@ public sealed class OvertimeCalculator
         ApplyMonthlyPersonalLeaveDeduction(records, settings);
         foreach (var record in records)
         {
-            record.OvertimePay = decimal.Round(
+            record.UncappedOvertimePay = decimal.Round(
                 (decimal)Math.Max(0, record.Hours) * record.HourlyRate,
                 2,
                 MidpointRounding.AwayFromZero);
         }
-        ReconcileMonthlyOvertimePay(records);
+        ReconcileMonthlyUncappedOvertimePay(records);
+        foreach (var record in records)
+        {
+            record.OvertimePay = record.UncappedOvertimePay;
+        }
+        ApplyMonthlyOvertimePayCap(records, settings);
         foreach (var record in records)
         {
             record.Amount = record.OvertimePay + record.MealAllowance;
@@ -74,7 +79,7 @@ public sealed class OvertimeCalculator
         }
     }
 
-    private static void ReconcileMonthlyOvertimePay(IReadOnlyList<OvertimeRecord> records)
+    private static void ReconcileMonthlyUncappedOvertimePay(IReadOnlyList<OvertimeRecord> records)
     {
         // 工资侧按“月份 + 日期类型 + 费率”的总小时计算金额，再统一保留到分。
         // 日历仍展示逐日金额，最后一个有效日期承接最多几分钱的舍入差，确保月合计一致。
@@ -91,7 +96,7 @@ public sealed class OvertimeCalculator
                 (decimal)Math.Max(0, group.Sum(item => item.Hours)) * group.Key.HourlyRate,
                 2,
                 MidpointRounding.AwayFromZero);
-            var current = group.Sum(item => item.OvertimePay);
+            var current = group.Sum(item => item.UncappedOvertimePay);
             var difference = target - current;
             if (difference == 0) continue;
 
@@ -101,7 +106,49 @@ public sealed class OvertimeCalculator
                 .LastOrDefault();
             if (adjustmentRecord is not null)
             {
-                adjustmentRecord.OvertimePay += difference;
+                adjustmentRecord.UncappedOvertimePay += difference;
+            }
+        }
+    }
+
+    private static void ApplyMonthlyOvertimePayCap(
+        IReadOnlyList<OvertimeRecord> records,
+        AppSettings settings)
+    {
+        if (!settings.EnableOvertimePayCap || settings.MonthlyOvertimePayCap <= 0) return;
+
+        var monthlyCap = decimal.Round(
+            settings.MonthlyOvertimePayCap,
+            2,
+            MidpointRounding.AwayFromZero);
+        foreach (var month in records.GroupBy(item => new { item.Date.Year, item.Date.Month }))
+        {
+            var remaining = monthlyCap;
+            var cappedRecords = month
+                .Where(item => settings.OvertimePayCapEffectiveDate is not DateOnly effectiveDate ||
+                               item.Date >= effectiveDate)
+                .Where(item => !settings.ExcludeHolidayPayFromCap || item.Kind != DayKind.Holiday)
+                .OrderBy(item => item.Date);
+
+            foreach (var record in cappedRecords)
+            {
+                var uncappedPay = Math.Max(0, record.UncappedOvertimePay);
+                var actualPay = Math.Min(uncappedPay, remaining);
+                record.OvertimePay = actualPay;
+                record.CapDeductedPay = uncappedPay - actualPay;
+                remaining = Math.Max(0, remaining - actualPay);
+
+                if (record.CapDeductedPay <= 0 || record.HourlyRate <= 0) continue;
+
+                record.CapExcludedHours = Math.Round(
+                    Math.Min(
+                        Math.Max(0, record.Hours),
+                        (double)(record.CapDeductedPay / record.HourlyRate)),
+                    6,
+                    MidpointRounding.AwayFromZero);
+                record.SourceDescription +=
+                    $"；月度加班费封顶少计 ¥{record.CapDeductedPay:0.##}，" +
+                    $"无效加班 {FormatDuration(record.CapExcludedHours)}";
             }
         }
     }
@@ -292,6 +339,10 @@ public sealed class OvertimeCalculator
             PersonalLeaveHours = records.Sum(item => item.PersonalLeaveHours),
             AnnualLeaveHours = records.Sum(item => item.AnnualLeaveHours),
             LeaveDeductedHours = records.Sum(item => item.LeaveDeductedHours),
+            CapExcludedHours = records.Sum(item => item.CapExcludedHours),
+            GrossOvertimePay = records.Sum(item => item.GrossOvertimePay),
+            UncappedOvertimePay = records.Sum(item => item.UncappedOvertimePay),
+            CapDeductedPay = records.Sum(item => item.CapDeductedPay),
             OvertimePay = records.Sum(item => item.OvertimePay),
             MealAllowanceCount = records.Sum(item => item.MealAllowanceCount),
             MealAllowance = records.Sum(item => item.MealAllowance),

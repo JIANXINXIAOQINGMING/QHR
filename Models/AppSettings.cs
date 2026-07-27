@@ -2,10 +2,14 @@ namespace QHR.Models;
 
 public sealed class AppSettings
 {
-    public int SettingsVersion { get; set; } = 5;
+    public int SettingsVersion { get; set; } = 6;
     public decimal WorkdayRate { get; set; } = 20m;
     public decimal WeekendRate { get; set; } = 30m;
     public decimal HolidayRate { get; set; } = 60m;
+    public bool EnableOvertimePayCap { get; set; }
+    public decimal MonthlyOvertimePayCap { get; set; } = 2000m;
+    public bool ExcludeHolidayPayFromCap { get; set; } = true;
+    public DateOnly? OvertimePayCapEffectiveDate { get; set; }
     public decimal MealAllowanceAmount { get; set; } = 20m;
     public string FlexibleWorkStartEarliest { get; set; } = "08:30";
     public string FlexibleWorkStartLatest { get; set; } = "09:30";

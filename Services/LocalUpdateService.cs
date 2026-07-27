@@ -1,12 +1,12 @@
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace QHR.Services;
 
 /// <summary>
-/// 从程序运行目录读取本地更新包，并交给独立 PowerShell 进程在主程序退出后完成覆盖。
-/// 不访问网络，也不读取远程更新清单。
+/// 校验 QHR 完整发布包，并交给独立 PowerShell 进程在主程序退出后完成覆盖。
 /// </summary>
 public sealed class LocalUpdateService
 {
@@ -47,13 +47,8 @@ public sealed class LocalUpdateService
         .Select(path =>
         {
             var fileName = Path.GetFileName(path);
-            const string prefix = "QHR.Overtime-v";
-            var versionEnd = fileName.IndexOf('-', prefix.Length);
-            if (!fileName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) || versionEnd < 0)
-                return null;
-            var versionText = fileName[prefix.Length..versionEnd];
-            return Version.TryParse(versionText, out var version)
-                ? new LocalUpdatePackage(path, NormalizeVersion(version), versionText)
+            return TryParsePackageFileName(fileName, out var version, out var versionText)
+                ? new LocalUpdatePackage(path, version, versionText)
                 : null;
         })
         .Where(package => package is not null)
@@ -67,11 +62,15 @@ public sealed class LocalUpdateService
         CancellationToken cancellationToken = default)
     {
         var packagePath = Path.GetFullPath(package.Path);
-        if (!File.Exists(packagePath) ||
-            !string.Equals(Path.GetDirectoryName(packagePath)?.TrimEnd(Path.DirectorySeparatorChar),
-                InstallDirectory.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
+        if (!File.Exists(packagePath))
         {
-            throw new FileNotFoundException("本地更新包不存在或不在程序运行目录中", packagePath);
+            throw new FileNotFoundException("更新包不存在", packagePath);
+        }
+        if (!TryParsePackageFileName(Path.GetFileName(packagePath), out var fileNameVersion, out _) ||
+            fileNameVersion != NormalizeVersion(package.Version))
+        {
+            throw new InvalidDataException(
+                "更新包文件名不符合 QHR.Overtime-v版本-win-x64-Release.zip 命名规则");
         }
         if (package.Version <= NormalizeVersion(CurrentVersion))
         {
@@ -159,13 +158,33 @@ public sealed class LocalUpdateService
         }
     }
 
-    private static Version NormalizeVersion(Version version) => new(
+    internal static bool TryParsePackageFileName(
+        string fileName,
+        out Version version,
+        out string versionText)
+    {
+        var match = Regex.Match(
+            fileName ?? string.Empty,
+            @"^QHR\.Overtime-v(?<version>\d+\.\d+\.\d+(?:\.\d+)?)-win-x64-Release\.zip$",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        versionText = match.Success ? match.Groups["version"].Value : string.Empty;
+        if (!match.Success || !Version.TryParse(versionText, out var parsed))
+        {
+            version = new Version(0, 0, 0, 0);
+            return false;
+        }
+
+        version = NormalizeVersion(parsed);
+        return true;
+    }
+
+    internal static Version NormalizeVersion(Version version) => new(
         version.Major,
         version.Minor,
         Math.Max(0, version.Build),
         Math.Max(0, version.Revision));
 
-    private static string FormatVersion(Version version) =>
+    internal static string FormatVersion(Version version) =>
         $"{version.Major}.{version.Minor}.{Math.Max(0, version.Build)}";
 
     private static async Task<ExtractedUpdatePayload> ExtractAndValidateAsync(

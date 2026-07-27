@@ -14,6 +14,14 @@ public sealed class SummaryRow
     public double PersonalLeaveHours { get; init; }
     public double AnnualLeaveHours { get; init; }
     public double LeaveDeductedHours { get; init; }
+    public double CapExcludedHours { get; init; }
+    public double PaidHours => Math.Round(
+        Math.Max(0, TotalHours) - Math.Max(0, CapExcludedHours),
+        6,
+        MidpointRounding.AwayFromZero);
+    public decimal GrossOvertimePay { get; init; }
+    public decimal UncappedOvertimePay { get; init; }
+    public decimal CapDeductedPay { get; init; }
     public decimal OvertimePay { get; init; }
     public int MealAllowanceCount { get; init; }
     public decimal MealAllowance { get; init; }
