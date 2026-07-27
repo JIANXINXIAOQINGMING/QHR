@@ -6,6 +6,7 @@ public sealed class CalendarDayCell
     public string DayText { get; init; } = string.Empty;
     public string KindText { get; init; } = string.Empty;
     public string HoursText { get; init; } = string.Empty;
+    public string AmountText { get; init; } = string.Empty;
     public string LeaveText { get; init; } = string.Empty;
     public bool HasOvertime { get; init; }
     public bool HasLeave { get; init; }

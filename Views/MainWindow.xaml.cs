@@ -293,11 +293,8 @@ public partial class MainWindow : Window
                 Date = date,
                 DayText = day.ToString(CultureInfo.InvariantCulture),
                 KindText = kindText,
-                HoursText = hasGrossOvertime
-                    ? record!.CapExcludedHours > 0
-                        ? $"加班 {record.GrossDurationText} · 无效 {record.CapExcludedDurationText}"
-                        : $"加班 {record.GrossDurationText}"
-                    : string.Empty,
+                HoursText = hasGrossOvertime ? $"加班 {record!.GrossDurationText}" : string.Empty,
+                AmountText = hasGrossOvertime ? $"加班费 ¥{record!.OvertimePay:N2}" : string.Empty,
                 LeaveText = hasLeave ? record!.LeaveSummaryText : string.Empty,
                 HasOvertime = hasGrossOvertime,
                 HasLeave = hasLeave,
@@ -309,12 +306,9 @@ public partial class MainWindow : Window
 
         OvertimeCalendar.ItemsSource = cells;
         var monthRecords = recordsByDate.Values.ToArray();
-        var monthCapHours = monthRecords.Sum(item => item.CapExcludedHours);
         CalendarMonthSummaryText.Text = $"{month:yyyy 年 MM 月} · " +
                                         $"加班 {FormatDuration(monthRecords.Sum(item => item.GrossHours))} · " +
-                                        (monthCapHours > 0
-                                            ? $"封顶无效 {FormatDuration(monthCapHours)} · "
-                                            : string.Empty) +
+                                        $"加班费 ¥{monthRecords.Sum(item => item.OvertimePay):N2} · " +
                                         $"餐补 {monthRecords.Sum(item => item.MealAllowanceCount)} 次";
     }
 

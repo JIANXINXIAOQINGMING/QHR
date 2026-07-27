@@ -54,7 +54,7 @@
                                 <MenuItem Header="备份全部数据" Click="BackupAllDataMenuItem_Click" />
                                 <MenuItem Header="导入备份" Click="ImportBackupMenuItem_Click" />
                                 <Separator />
-                                <MenuItem x:Name="VersionMenuItem" Header="版本 v1.3.19" IsEnabled="False" />
+                                <MenuItem x:Name="VersionMenuItem" Header="版本 v1.3.20" IsEnabled="False" />
                                 <MenuItem Header="退出登录" Foreground="{StaticResource DangerBrush}" Click="LogoutButton_Click" />
                             </ContextMenu>
                         </Button.ContextMenu>
@@ -252,7 +252,7 @@
                                             </ItemsControl.ItemsPanel>
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate>
-                                                    <Border Margin="4" Padding="10,8" MinHeight="96" CornerRadius="11"
+                                                    <Border Margin="4" Padding="10,8" MinHeight="84" CornerRadius="11"
                                                             Cursor="Hand" MouseLeftButtonUp="CalendarDay_MouseLeftButtonUp">
                                                         <Border.Style>
                                                             <Style TargetType="Border">
@@ -280,6 +280,7 @@
                                                         </Border.Style>
                                                         <Grid>
                                                             <Grid.RowDefinitions>
+                                                                <RowDefinition Height="Auto" />
                                                                 <RowDefinition Height="Auto" />
                                                                 <RowDefinition Height="Auto" />
                                                                 <RowDefinition Height="Auto" />
@@ -315,6 +316,19 @@
                                                             </TextBlock>
                                                             <TextBlock Grid.Row="2" Text="{Binding HoursText}" FontSize="12" FontWeight="SemiBold"
                                                                        Foreground="{StaticResource AccentBrush}" Margin="0,3,0,1" />
+                                                            <TextBlock Grid.Row="3" Text="{Binding AmountText}" FontSize="11">
+                                                                <TextBlock.Style>
+                                                                    <Style TargetType="TextBlock">
+                                                                        <Setter Property="Foreground" Value="{StaticResource SuccessBrush}" />
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding IsHoliday}" Value="True">
+                                                                                <Setter Property="Foreground" Value="{StaticResource HolidayBrush}" />
+                                                                                <Setter Property="FontWeight" Value="SemiBold" />
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </TextBlock.Style>
+                                                            </TextBlock>
                                                         </Grid>
                                                     </Border>
                                                 </DataTemplate>
