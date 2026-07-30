@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
@@ -107,7 +108,7 @@ public partial class MainWindow : Window
 
         Loaded += MainWindow_Loaded;
         Closed += MainWindow_Closed;
-        StateChanged += (_, _) => MaximizeButton.Content = WindowState == WindowState.Maximized ? "❐" : "□";
+        StateChanged += (_, _) => UpdateMaximizeGlyph();
     }
 
     protected override void OnSourceInitialized(EventArgs e)
@@ -1722,11 +1723,26 @@ public partial class MainWindow : Window
         var initialValue = TryReadDecimal(ExpenseAmountTextBox.Text, out var parsed) ? parsed : 0;
         ResetExpenseCalculator(initialValue);
         ExpenseCalculatorPanel.Visibility = Visibility.Visible;
+        ExpenseCalculatorPanel.Focus();
     }
 
     private void ExpenseCalculatorButton_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button { Tag: string key }) return;
+        ExecuteExpenseCalculatorCommand(key);
+    }
+
+    private void ExpenseCalculatorPanel_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        var command = GetExpenseCalculatorKeyboardCommand(e.Key, Keyboard.Modifiers);
+        if (command is null) return;
+
+        e.Handled = true;
+        ExecuteExpenseCalculatorCommand(command);
+    }
+
+    private void ExecuteExpenseCalculatorCommand(string key)
+    {
         try
         {
             switch (key)
@@ -1767,6 +1783,38 @@ public partial class MainWindow : Window
         {
             ExpenseEntryStatusText.Text = ex.Message;
         }
+    }
+
+    private static string? GetExpenseCalculatorKeyboardCommand(Key key, ModifierKeys modifiers)
+    {
+        if ((modifiers & (ModifierKeys.Control | ModifierKeys.Alt | ModifierKeys.Windows)) != 0)
+            return null;
+
+        if (key is >= Key.NumPad0 and <= Key.NumPad9)
+            return ((int)key - (int)Key.NumPad0).ToString(CultureInfo.InvariantCulture);
+
+        if (key is >= Key.D0 and <= Key.D9)
+        {
+            if ((modifiers & ModifierKeys.Shift) != 0)
+                return key == Key.D8 ? "*" : null;
+            return ((int)key - (int)Key.D0).ToString(CultureInfo.InvariantCulture);
+        }
+
+        return key switch
+        {
+            Key.Decimal or Key.OemPeriod => ".",
+            Key.Add => "+",
+            Key.OemPlus => (modifiers & ModifierKeys.Shift) != 0 ? "+" : "=",
+            Key.Subtract or Key.OemMinus => "-",
+            Key.Multiply => "*",
+            Key.Divide => "/",
+            Key.OemQuestion when (modifiers & ModifierKeys.Shift) == 0 => "/",
+            Key.Enter => "=",
+            Key.Back => "back",
+            Key.Delete or Key.C => "clear",
+            Key.Escape => "cancel",
+            _ => null
+        };
     }
 
     private void ResetExpenseCalculator(decimal value)
@@ -2248,6 +2296,14 @@ public partial class MainWindow : Window
     private void MinimizeButton_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
     private void MaximizeButton_Click(object sender, RoutedEventArgs e) => ToggleMaximize();
     private void ToggleMaximize() => WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+    private void UpdateMaximizeGlyph()
+    {
+        var isMaximized = WindowState == WindowState.Maximized;
+        MaximizeGlyph.Visibility = isMaximized ? Visibility.Collapsed : Visibility.Visible;
+        RestoreGlyph.Visibility = isMaximized ? Visibility.Visible : Visibility.Collapsed;
+        MaximizeButton.ToolTip = isMaximized ? "还原" : "最大化";
+        AutomationProperties.SetName(MaximizeButton, isMaximized ? "还原" : "最大化");
+    }
     private void CloseButton_Click(object sender, RoutedEventArgs e) => Close();
 
     private void ProfileButton_Click(object sender, RoutedEventArgs e)

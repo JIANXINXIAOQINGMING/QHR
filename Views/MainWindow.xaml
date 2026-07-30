@@ -54,7 +54,7 @@
                                 <MenuItem Header="备份全部数据" Click="BackupAllDataMenuItem_Click" />
                                 <MenuItem Header="导入备份" Click="ImportBackupMenuItem_Click" />
                                 <Separator />
-                                <MenuItem x:Name="VersionMenuItem" Header="版本 v1.3.20" IsEnabled="False" />
+                                <MenuItem x:Name="VersionMenuItem" Header="版本 v1.3.22" IsEnabled="False" />
                                 <MenuItem Header="退出登录" Foreground="{StaticResource DangerBrush}" Click="LogoutButton_Click" />
                             </ContextMenu>
                         </Button.ContextMenu>
@@ -69,9 +69,34 @@
                             </Border>
                         </StackPanel>
                     </Button>
-                    <Button Style="{StaticResource IconButtonStyle}" Content="—" Click="MinimizeButton_Click" />
-                    <Button x:Name="MaximizeButton" Style="{StaticResource IconButtonStyle}" Content="□" Click="MaximizeButton_Click" />
-                    <Button Style="{StaticResource IconButtonStyle}" Content="✕" Click="CloseButton_Click" />
+                    <Button Style="{StaticResource IconButtonStyle}" ToolTip="最小化"
+                            AutomationProperties.Name="最小化" Click="MinimizeButton_Click">
+                        <Grid Width="16" Height="16">
+                            <Path Data="M 2,8 L 14,8" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}"
+                                  StrokeThickness="1.5" StrokeStartLineCap="Square" StrokeEndLineCap="Square"
+                                  SnapsToDevicePixels="True" />
+                        </Grid>
+                    </Button>
+                    <Button x:Name="MaximizeButton" Style="{StaticResource IconButtonStyle}" ToolTip="最大化"
+                            AutomationProperties.Name="最大化" Click="MaximizeButton_Click">
+                        <Grid Width="16" Height="16">
+                            <Path x:Name="MaximizeGlyph" Data="M 2.5,2.5 L 13.5,2.5 13.5,13.5 2.5,13.5 Z"
+                                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}"
+                                  StrokeThickness="1.35" SnapsToDevicePixels="True" />
+                            <Path x:Name="RestoreGlyph" Data="M 5,2.5 L 13.5,2.5 13.5,11 M 2.5,5 L 11,5 11,13.5 2.5,13.5 Z"
+                                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}"
+                                  StrokeThickness="1.35" SnapsToDevicePixels="True" Visibility="Collapsed" />
+                        </Grid>
+                    </Button>
+                    <Button Style="{StaticResource IconButtonStyle}" ToolTip="关闭"
+                            AutomationProperties.Name="关闭" Click="CloseButton_Click">
+                        <Grid Width="16" Height="16">
+                            <Path Data="M 3,3 L 13,13 M 13,3 L 3,13"
+                                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}"
+                                  StrokeThickness="1.5" StrokeStartLineCap="Square" StrokeEndLineCap="Square"
+                                  SnapsToDevicePixels="True" />
+                        </Grid>
+                    </Button>
                 </StackPanel>
             </Grid>
 
@@ -1372,7 +1397,8 @@
 
                                     <Border x:Name="ExpenseCalculatorPanel" Visibility="Collapsed" Margin="0,14,0,0"
                                             Background="#461473E6" BorderBrush="#421473E6" BorderThickness="1"
-                                            CornerRadius="11" Padding="12">
+                                            CornerRadius="11" Padding="12" Focusable="True"
+                                            PreviewKeyDown="ExpenseCalculatorPanel_PreviewKeyDown">
                                         <Grid>
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="220" />
@@ -1384,7 +1410,7 @@
                                                 <TextBox x:Name="ExpenseCalculatorDisplayTextBox" Text="0" IsReadOnly="True"
                                                          FontSize="24" FontWeight="SemiBold" TextAlignment="Right"
                                                          Margin="0,10,0,0" Padding="10,7" />
-                                                <TextBlock Text="计算完成后点“使用”回填金额" Style="{StaticResource MutedTextStyle}"
+                                                <TextBlock Text="支持键盘与数字小键盘；Enter 计算，Esc 关闭" Style="{StaticResource MutedTextStyle}"
                                                            FontSize="11" Margin="2,7,0,0" TextWrapping="Wrap" />
                                             </StackPanel>
                                             <UniformGrid Grid.Column="2" Columns="4">

@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Input;
@@ -39,7 +40,7 @@ public partial class QhrCaptureWindow : Window
         AddressTextBox.Text = _startUrl;
         Loaded += QhrCaptureWindow_Loaded;
         Closing += QhrCaptureWindow_Closing;
-        StateChanged += (_, _) => MaximizeButton.Content = WindowState == WindowState.Maximized ? "❐" : "□";
+        StateChanged += (_, _) => UpdateMaximizeGlyph();
     }
 
     private async void QhrCaptureWindow_Loaded(object sender, RoutedEventArgs e)
@@ -462,5 +463,13 @@ public partial class QhrCaptureWindow : Window
     private void MinimizeButton_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
     private void MaximizeButton_Click(object sender, RoutedEventArgs e) => ToggleMaximize();
     private void ToggleMaximize() => WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+    private void UpdateMaximizeGlyph()
+    {
+        var isMaximized = WindowState == WindowState.Maximized;
+        MaximizeGlyph.Visibility = isMaximized ? Visibility.Collapsed : Visibility.Visible;
+        RestoreGlyph.Visibility = isMaximized ? Visibility.Visible : Visibility.Collapsed;
+        MaximizeButton.ToolTip = isMaximized ? "还原" : "最大化";
+        AutomationProperties.SetName(MaximizeButton, isMaximized ? "还原" : "最大化");
+    }
     private void CloseButton_Click(object sender, RoutedEventArgs e) => Close();
 }

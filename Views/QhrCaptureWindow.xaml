@@ -29,9 +29,34 @@
                 </StackPanel>
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="0,0,10,0">
-                <Button Style="{StaticResource IconButtonStyle}" Content="—" Click="MinimizeButton_Click" />
-                <Button x:Name="MaximizeButton" Style="{StaticResource IconButtonStyle}" Content="□" Click="MaximizeButton_Click" />
-                <Button Style="{StaticResource IconButtonStyle}" Content="✕" Click="CloseButton_Click" />
+                <Button Style="{StaticResource IconButtonStyle}" ToolTip="最小化"
+                        AutomationProperties.Name="最小化" Click="MinimizeButton_Click">
+                    <Grid Width="16" Height="16">
+                        <Path Data="M 2,8 L 14,8" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}"
+                              StrokeThickness="1.5" StrokeStartLineCap="Square" StrokeEndLineCap="Square"
+                              SnapsToDevicePixels="True" />
+                    </Grid>
+                </Button>
+                <Button x:Name="MaximizeButton" Style="{StaticResource IconButtonStyle}" ToolTip="最大化"
+                        AutomationProperties.Name="最大化" Click="MaximizeButton_Click">
+                    <Grid Width="16" Height="16">
+                        <Path x:Name="MaximizeGlyph" Data="M 2.5,2.5 L 13.5,2.5 13.5,13.5 2.5,13.5 Z"
+                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}"
+                              StrokeThickness="1.35" SnapsToDevicePixels="True" />
+                        <Path x:Name="RestoreGlyph" Data="M 5,2.5 L 13.5,2.5 13.5,11 M 2.5,5 L 11,5 11,13.5 2.5,13.5 Z"
+                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}"
+                              StrokeThickness="1.35" SnapsToDevicePixels="True" Visibility="Collapsed" />
+                    </Grid>
+                </Button>
+                <Button Style="{StaticResource IconButtonStyle}" ToolTip="关闭"
+                        AutomationProperties.Name="关闭" Click="CloseButton_Click">
+                    <Grid Width="16" Height="16">
+                        <Path Data="M 3,3 L 13,13 M 13,3 L 3,13"
+                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}"
+                              StrokeThickness="1.5" StrokeStartLineCap="Square" StrokeEndLineCap="Square"
+                              SnapsToDevicePixels="True" />
+                    </Grid>
+                </Button>
             </StackPanel>
         </Grid>
 
