@@ -54,7 +54,7 @@
                                 <MenuItem Header="备份全部数据" Click="BackupAllDataMenuItem_Click" />
                                 <MenuItem Header="导入备份" Click="ImportBackupMenuItem_Click" />
                                 <Separator />
-                                <MenuItem x:Name="VersionMenuItem" Header="版本 v1.3.23" IsEnabled="False" />
+                                <MenuItem x:Name="VersionMenuItem" Header="版本 v1.3.24" IsEnabled="False" />
                                 <MenuItem Header="退出登录" Foreground="{StaticResource DangerBrush}" Click="LogoutButton_Click" />
                             </ContextMenu>
                         </Button.ContextMenu>
