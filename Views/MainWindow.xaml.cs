@@ -212,14 +212,14 @@ public partial class MainWindow : Window
             .Select(item => new HolidayDisplayRow(item))
             .ToArray();
 
-        var hours = calculated.Sum(item => item.Hours);
+        var hours = calculated.Sum(item => item.ActualHours);
         var amount = calculated.Sum(item => item.OvertimePay);
         var grossOvertimePay = OvertimeCalculator.CalculateGrossOvertimePay(calculated);
         var capDeductedPay = calculated.Sum(item => item.CapDeductedPay);
         var capExcludedHours = calculated.Sum(item => item.CapExcludedHours);
         var mealAllowanceCount = calculated.Sum(item => item.MealAllowanceCount);
         var mealAllowanceAmount = calculated.Sum(item => item.MealAllowance);
-        var days = calculated.Count(item => item.Hours > 0);
+        var days = calculated.Count(item => item.ActualHours > 0);
         TotalHoursText.Text = hours.ToString("0.##");
         GrossOvertimePayText.Text = $"¥ {grossOvertimePay:N2}";
         TotalAmountText.Text = $"¥ {amount:N2}";
@@ -287,17 +287,17 @@ public partial class MainWindow : Window
                 kindText = "周末";
             }
 
-            var hasGrossOvertime = record is not null && record.GrossHours > 0.0001;
+            var hasOvertime = record is not null && record.ActualHours > 0.0001;
             var hasLeave = record is not null && !string.IsNullOrWhiteSpace(record.LeaveSummaryText);
             cells.Add(new CalendarDayCell
             {
                 Date = date,
                 DayText = day.ToString(CultureInfo.InvariantCulture),
                 KindText = kindText,
-                HoursText = hasGrossOvertime ? $"加班 {record!.GrossDurationText}" : string.Empty,
-                AmountText = hasGrossOvertime ? $"加班费 ¥{record!.OvertimePay:N2}" : string.Empty,
+                HoursText = hasOvertime ? $"加班 {record!.ActualDurationText}" : string.Empty,
+                AmountText = hasOvertime ? $"加班费 ¥{record!.OvertimePay:N2}" : string.Empty,
                 LeaveText = hasLeave ? record!.LeaveSummaryText : string.Empty,
-                HasOvertime = hasGrossOvertime,
+                HasOvertime = hasOvertime,
                 HasLeave = hasLeave,
                 HasPersonalLeave = record?.PersonalLeaveHours > 0,
                 IsToday = date == today,
@@ -308,7 +308,7 @@ public partial class MainWindow : Window
         OvertimeCalendar.ItemsSource = cells;
         var monthRecords = recordsByDate.Values.ToArray();
         CalendarMonthSummaryText.Text = $"{month:yyyy 年 MM 月} · " +
-                                        $"加班 {FormatDuration(monthRecords.Sum(item => item.GrossHours))} · " +
+                                        $"加班 {FormatDuration(monthRecords.Sum(item => item.ActualHours))} · " +
                                         $"加班费 ¥{monthRecords.Sum(item => item.OvertimePay):N2} · " +
                                         $"餐补 {monthRecords.Sum(item => item.MealAllowanceCount)} 次";
     }
@@ -635,6 +635,7 @@ public partial class MainWindow : Window
         builder.AppendLine($"首卡 / 末卡：{record?.ClockInText ?? "--:--"} / {record?.ClockOutText ?? "--:--"}");
         builder.AppendLine($"原始加班：{record?.GrossDurationText ?? "0h00m"}");
         builder.AppendLine($"延时工时抵扣：{record?.DelayDeductedDurationText ?? "0h00m"}");
+        builder.AppendLine($"实际加班：{record?.ActualDurationText ?? "0h00m"}");
         builder.AppendLine($"请假：{(string.IsNullOrWhiteSpace(record?.LeaveSummaryText) ? "无" : record.LeaveSummaryText)}");
         builder.AppendLine($"月度事假抵扣：{record?.LeaveDeductedDurationText ?? "0h00m"}");
         builder.AppendLine($"封顶前加班：{record?.HoursDurationText ?? "0h00m"}");
@@ -652,7 +653,7 @@ public partial class MainWindow : Window
     private static string BuildMonthExportCsv(IReadOnlyList<OvertimeRecord> records)
     {
         var builder = new StringBuilder();
-        builder.AppendLine("日期,日期类型,首卡,末卡,原始加班,延时工时抵扣,请假类型与时长,月度事假抵扣,封顶前加班,封顶无效加班,有效计费加班,总加班费,应计加班费,封顶少计,实际加班费,餐补次数,餐补金额,总合计,实际合计");
+        builder.AppendLine("日期,日期类型,首卡,末卡,原始加班,延时工时抵扣,实际加班,请假类型与时长,月度事假抵扣,封顶前加班,封顶无效加班,有效计费加班,总加班费,应计加班费,封顶少计,实际加班费,餐补次数,餐补金额,总合计,实际合计");
         foreach (var record in records)
         {
             builder.AppendLine(string.Join(",",
@@ -662,6 +663,7 @@ public partial class MainWindow : Window
                 EscapeCsv(record.ClockOutText),
                 EscapeCsv(record.GrossDurationText),
                 EscapeCsv(record.DelayDeductedDurationText),
+                EscapeCsv(record.ActualDurationText),
                 EscapeCsv(record.LeaveSummaryText),
                 EscapeCsv(record.LeaveDeductedDurationText),
                 EscapeCsv(record.HoursDurationText),
@@ -782,11 +784,11 @@ public partial class MainWindow : Window
                     Label = $"{month:00}月",
                     Pay = monthRecords.Sum(item => item.OvertimePay),
                     MealCount = monthRecords.Sum(item => item.MealAllowanceCount),
-                    WorkdayHours = monthRecords.Where(item => item.Kind == DayKind.Workday).Sum(item => item.Hours),
-                    WeekendHours = monthRecords.Where(item => item.Kind == DayKind.Weekend).Sum(item => item.Hours),
-                    HolidayHours = monthRecords.Where(item => item.Kind == DayKind.Holiday).Sum(item => item.Hours),
+                    WorkdayHours = monthRecords.Where(item => item.Kind == DayKind.Workday).Sum(item => item.ActualHours),
+                    WeekendHours = monthRecords.Where(item => item.Kind == DayKind.Weekend).Sum(item => item.ActualHours),
+                    HolidayHours = monthRecords.Where(item => item.Kind == DayKind.Holiday).Sum(item => item.ActualHours),
                     CapExcludedHours = monthRecords.Sum(item => item.CapExcludedHours),
-                    TotalHours = monthRecords.Sum(item => item.Hours)
+                    TotalHours = monthRecords.Sum(item => item.ActualHours)
                 };
             })
             .ToArray();
@@ -993,7 +995,7 @@ public partial class MainWindow : Window
         var target = _goalData.TargetAmount;
         var remaining = target > 0 ? Math.Max(0, target - effective) : 0;
         var progress = target <= 0 ? 0 : Math.Clamp((double)(effective / target * 100m), 0, 100);
-        var totalHours = scopedRecords.Sum(item => item.Hours);
+        var totalHours = scopedRecords.Sum(item => item.ActualHours);
         var averageHourlyRate = totalHours > 0 ? (double)earned / totalHours : 0;
 
         GoalTitleText.Text = string.IsNullOrWhiteSpace(_goalData.GoalName)
@@ -1038,10 +1040,10 @@ public partial class MainWindow : Window
                 DurationDays = Math.Max(1, completedDate.DayNumber - _goalData.StartDate.DayNumber + 1),
                 IncludedMealAllowance = _goalData.IncludeMealAllowance,
                 OvertimeHours = totalHours,
-                OvertimeDays = scopedRecords.Count(item => item.Hours > 0),
-                WorkdayHours = scopedRecords.Where(item => item.Kind == DayKind.Workday).Sum(item => item.Hours),
-                WeekendHours = scopedRecords.Where(item => item.Kind == DayKind.Weekend).Sum(item => item.Hours),
-                HolidayHours = scopedRecords.Where(item => item.Kind == DayKind.Holiday).Sum(item => item.Hours),
+                OvertimeDays = scopedRecords.Count(item => item.ActualHours > 0),
+                WorkdayHours = scopedRecords.Where(item => item.Kind == DayKind.Workday).Sum(item => item.ActualHours),
+                WeekendHours = scopedRecords.Where(item => item.Kind == DayKind.Weekend).Sum(item => item.ActualHours),
+                HolidayHours = scopedRecords.Where(item => item.Kind == DayKind.Holiday).Sum(item => item.ActualHours),
                 OvertimePay = overtimePay,
                 MealAllowance = mealAllowance,
                 EarnedAmount = earned,
@@ -1943,6 +1945,60 @@ public partial class MainWindow : Window
         finally
         {
             SetBusy(false, HeaderStatusText.Text);
+        }
+    }
+
+    private async void EnableOvertimePayCapCheckBox_Click(object sender, RoutedEventArgs e)
+    {
+        SettingsStatusText.Text = string.Empty;
+        var originalEnabled = _settings.EnableOvertimePayCap;
+        var originalCap = _settings.MonthlyOvertimePayCap;
+        var originalHolidayExclusion = _settings.ExcludeHolidayPayFromCap;
+        var originalEffectiveDate = _settings.OvertimePayCapEffectiveDate;
+
+        try
+        {
+            var requestedEnabled = EnableOvertimePayCapCheckBox.IsChecked == true;
+            var requestedCap = requestedEnabled
+                ? ReadDecimal(MonthlyOvertimePayCapTextBox.Text, "每月加班费封顶金额")
+                : originalCap;
+            if (requestedEnabled && requestedCap <= 0)
+                throw new ArgumentException("启用加班费封顶时，封顶金额必须大于 0");
+
+            if (requestedEnabled && !originalEnabled && !_overtimeCapScopeChosenSinceLoad &&
+                !ChooseOvertimeCapEffectiveScope())
+            {
+                EnableOvertimePayCapCheckBox.IsChecked = originalEnabled;
+                SettingsStatusText.Text = "已取消启用，封顶设置未更改";
+                return;
+            }
+
+            _settings.EnableOvertimePayCap = requestedEnabled;
+            _settings.MonthlyOvertimePayCap = decimal.Round(
+                requestedCap,
+                2,
+                MidpointRounding.AwayFromZero);
+            _settings.ExcludeHolidayPayFromCap = ExcludeHolidayPayFromCapCheckBox.IsChecked == true;
+            _settings.OvertimePayCapEffectiveDate = _pendingOvertimePayCapEffectiveDate;
+            await _settingsService.SaveAsync(_settings);
+            RecalculateCurrentResults();
+            if (_analysisLoadedOn is not null) RecalculateAnalysisResults();
+            _overtimeCapScopeChosenSinceLoad = false;
+            SettingsStatusText.Text = requestedEnabled
+                ? $"月度封顶已启用并保存 · {GetOvertimeCapScopeText(_settings.OvertimePayCapEffectiveDate)}"
+                : "月度封顶已关闭并保存";
+        }
+        catch (Exception ex)
+        {
+            _settings.EnableOvertimePayCap = originalEnabled;
+            _settings.MonthlyOvertimePayCap = originalCap;
+            _settings.ExcludeHolidayPayFromCap = originalHolidayExclusion;
+            _settings.OvertimePayCapEffectiveDate = originalEffectiveDate;
+            _pendingOvertimePayCapEffectiveDate = originalEffectiveDate;
+            _overtimeCapScopeChosenSinceLoad = false;
+            EnableOvertimePayCapCheckBox.IsChecked = originalEnabled;
+            UpdateOvertimeCapScopeText();
+            MessageBox.Show(this, ex.Message, "封顶设置无效", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 

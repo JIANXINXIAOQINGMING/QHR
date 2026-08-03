@@ -54,7 +54,7 @@
                                 <MenuItem Header="备份全部数据" Click="BackupAllDataMenuItem_Click" />
                                 <MenuItem Header="导入备份" Click="ImportBackupMenuItem_Click" />
                                 <Separator />
-                                <MenuItem x:Name="VersionMenuItem" Header="版本 v1.3.22" IsEnabled="False" />
+                                <MenuItem x:Name="VersionMenuItem" Header="版本 v1.3.23" IsEnabled="False" />
                                 <MenuItem Header="退出登录" Foreground="{StaticResource DangerBrush}" Click="LogoutButton_Click" />
                             </ContextMenu>
                         </Button.ContextMenu>
@@ -775,7 +775,7 @@
                         <ScrollViewer VerticalScrollBarVisibility="Auto">
                             <StackPanel Margin="8,5,8,18">
                                 <TextBlock Text="计算设置" Style="{StaticResource PageTitleStyle}" />
-                                <TextBlock Text="费率、月度封顶、生效范围、请假抵扣、餐补和取整规则修改后会立即重算当前结果。"
+                                <TextBlock Text="“启用月度封顶”开关会立即保存；其他设置点击“保存并重新计算”后生效。"
                                            Style="{StaticResource MutedTextStyle}" Margin="0,7,0,18" />
 
                                 <Border Style="{StaticResource GlassCardStyle}" Padding="22" Margin="0,0,0,16">
@@ -802,7 +802,8 @@
                                                 <ColumnDefinition Width="*" />
                                             </Grid.ColumnDefinitions>
                                             <CheckBox x:Name="EnableOvertimePayCapCheckBox" Content="启用月度封顶"
-                                                      VerticalAlignment="Center" />
+                                                      VerticalAlignment="Top" Margin="0,1,0,0"
+                                                      Click="EnableOvertimePayCapCheckBox_Click" />
                                             <StackPanel Grid.Column="1" Margin="0,0,22,0">
                                                 <TextBlock Text="每月封顶金额（元）" Margin="0,0,0,7" />
                                                 <TextBox x:Name="MonthlyOvertimePayCapTextBox"
@@ -1182,15 +1183,17 @@
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                 <Grid.RowDefinitions><RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition /></Grid.RowDefinitions>
                                 <TextBlock Text="原始加班" Margin="0,4" />
-                                <TextBlock x:Name="DayDetailGrossText" Grid.Column="1" Text="0h00m" FontWeight="SemiBold" Margin="0,4" />
+                                <TextBlock x:Name="DayDetailGrossText" Grid.Column="1" Text="0h00m" FontWeight="SemiBold"
+                                           Margin="22,4,0,4" HorizontalAlignment="Right" TextAlignment="Right" />
                                 <TextBlock Grid.Row="1" Text="延时工时抵扣" Margin="0,4" />
-                                <TextBlock x:Name="DayDetailDelayText" Grid.Row="1" Grid.Column="1" Text="0h00m" FontWeight="SemiBold" Margin="0,4" />
+                                <TextBlock x:Name="DayDetailDelayText" Grid.Row="1" Grid.Column="1" Text="0h00m" FontWeight="SemiBold"
+                                           Margin="22,4,0,4" HorizontalAlignment="Right" TextAlignment="Right" />
                                 <TextBlock Grid.Row="2" Text="请假 / 月度抵扣" Margin="0,4" />
                                 <TextBlock x:Name="DayDetailLeaveText" Grid.Row="2" Grid.Column="1" Text="无" FontWeight="SemiBold"
-                                           Margin="22,4,0,4" TextAlignment="Right" TextWrapping="Wrap" />
+                                           Margin="22,4,0,4" HorizontalAlignment="Right" TextAlignment="Right" TextWrapping="Wrap" />
                                 <TextBlock Grid.Row="3" Text="封顶无效" Margin="0,4" />
                                 <TextBlock x:Name="DayDetailCapText" Grid.Row="3" Grid.Column="1" Text="0h00m / ¥ 0.00"
-                                           FontWeight="SemiBold" Margin="22,4,0,4" TextAlignment="Right"
+                                           FontWeight="SemiBold" Margin="22,4,0,4" HorizontalAlignment="Right" TextAlignment="Right"
                                            Foreground="{StaticResource DangerBrush}" />
                             </Grid>
                         </Border>

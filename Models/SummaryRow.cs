@@ -16,7 +16,11 @@ public sealed class SummaryRow
     public double LeaveDeductedHours { get; init; }
     public double CapExcludedHours { get; init; }
     public double PaidHours => Math.Round(
-        Math.Max(0, TotalHours) - Math.Max(0, CapExcludedHours),
+        Math.Max(
+            0,
+            Math.Max(0, TotalHours) -
+            Math.Max(0, LeaveDeductedHours) -
+            Math.Max(0, CapExcludedHours)),
         6,
         MidpointRounding.AwayFromZero);
     public decimal GrossOvertimePay { get; init; }

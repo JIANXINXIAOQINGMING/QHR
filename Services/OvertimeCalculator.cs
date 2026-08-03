@@ -20,7 +20,7 @@ public sealed class OvertimeCalculator
         foreach (var record in records)
         {
             record.GrossOvertimePay = decimal.Round(
-                (decimal)Math.Max(0, record.GrossHours) * record.HourlyRate,
+                (decimal)Math.Max(0, record.ActualHours) * record.HourlyRate,
                 2,
                 MidpointRounding.AwayFromZero);
         }
@@ -49,7 +49,7 @@ public sealed class OvertimeCalculator
 
     private static void ReconcileMonthlyGrossOvertimePay(IReadOnlyList<OvertimeRecord> records)
     {
-        // 每日展示的是抵扣前金额。按月、日期类型和费率统一处理舍入差，
+        // 总加班费排除延时工时，但尚未抵扣事假和封顶。按月、日期类型和费率统一处理舍入差，
         // 让日历逐日金额相加后与“总加班费”严格一致。
         foreach (var group in records
                      .GroupBy(item => new
@@ -61,7 +61,7 @@ public sealed class OvertimeCalculator
                      }))
         {
             var target = decimal.Round(
-                (decimal)Math.Max(0, group.Sum(item => item.GrossHours)) * group.Key.HourlyRate,
+                (decimal)Math.Max(0, group.Sum(item => item.ActualHours)) * group.Key.HourlyRate,
                 2,
                 MidpointRounding.AwayFromZero);
             var current = group.Sum(item => item.GrossOvertimePay);
@@ -69,7 +69,7 @@ public sealed class OvertimeCalculator
             if (difference == 0) continue;
 
             var adjustmentRecord = group
-                .Where(item => item.GrossHours > Epsilon)
+                .Where(item => item.ActualHours > Epsilon)
                 .OrderBy(item => item.Date)
                 .LastOrDefault();
             if (adjustmentRecord is not null)
@@ -176,7 +176,7 @@ public sealed class OvertimeCalculator
                 item.HourlyRate
             })
             .Sum(group => decimal.Round(
-                (decimal)Math.Max(0, group.Sum(item => item.GrossHours)) * group.Key.HourlyRate,
+                (decimal)Math.Max(0, group.Sum(item => item.ActualHours)) * group.Key.HourlyRate,
                 2,
                 MidpointRounding.AwayFromZero));
 
@@ -205,6 +205,7 @@ public sealed class OvertimeCalculator
             Math.Min(grossHours, delayedHours),
             6,
             MidpointRounding.AwayFromZero);
+        // 延时申请对应加班区间内不计的时间：先形成实际加班，事假再按月从该时长中抵扣。
         var hoursAfterDelay = Math.Round(
             Math.Max(0, grossHours - delayDeductedHours),
             6,
@@ -245,6 +246,7 @@ public sealed class OvertimeCalculator
             GrossHours = grossHours,
             DelayedHours = delayedHours,
             DelayDeductedHours = delayDeductedHours,
+            ActualHours = hoursAfterDelay,
             LeaveHours = Math.Round(Math.Max(0, attendance.LeaveHours), 6, MidpointRounding.AwayFromZero),
             PersonalLeaveHours = personalLeaveHours,
             AnnualLeaveHours = annualLeaveHours,
@@ -330,10 +332,10 @@ public sealed class OvertimeCalculator
         return new SummaryRow
         {
             Period = period,
-            OvertimeDays = records.Count(item => item.Hours > Epsilon),
-            WorkdayHours = records.Where(item => item.Kind == DayKind.Workday).Sum(item => item.Hours),
-            WeekendHours = records.Where(item => item.Kind == DayKind.Weekend).Sum(item => item.Hours),
-            HolidayHours = records.Where(item => item.Kind == DayKind.Holiday).Sum(item => item.Hours),
+            OvertimeDays = records.Count(item => item.ActualHours > Epsilon),
+            WorkdayHours = records.Where(item => item.Kind == DayKind.Workday).Sum(item => item.ActualHours),
+            WeekendHours = records.Where(item => item.Kind == DayKind.Weekend).Sum(item => item.ActualHours),
+            HolidayHours = records.Where(item => item.Kind == DayKind.Holiday).Sum(item => item.ActualHours),
             DelayDeductedHours = records.Sum(item => item.DelayDeductedHours),
             LeaveHours = records.Sum(item => item.LeaveHours),
             PersonalLeaveHours = records.Sum(item => item.PersonalLeaveHours),

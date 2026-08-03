@@ -34,6 +34,8 @@ public sealed class OvertimeRecord
     public double DelayedHours { get; init; }
     public double DelayDeductedHours { get; init; }
     public string DelayDeductedDurationText => FormatDuration(DelayDeductedHours);
+    public double ActualHours { get; init; }
+    public string ActualDurationText => FormatDuration(ActualHours);
     public double LeaveHours { get; init; }
     public double PersonalLeaveHours { get; init; }
     public double AnnualLeaveHours { get; init; }
