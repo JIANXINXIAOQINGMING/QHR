@@ -104,8 +104,17 @@
                             <TextBlock x:Name="ErrorTextBlock" Foreground="{StaticResource DangerBrush}" TextWrapping="Wrap" />
                         </Border>
 
-                        <Button x:Name="LoginButton" Content="登录并进入" Style="{StaticResource AccentButtonStyle}"
-                                Height="44" Margin="0,22,0,0" Click="LoginButton_Click" />
+                        <Grid Margin="0,22,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="10" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Button x:Name="LoginButton" Content="登录并进入" Style="{StaticResource AccentButtonStyle}"
+                                    Height="44" Click="LoginButton_Click" />
+                            <Button x:Name="OfflineButton" Grid.Column="2" Content="离线查看本地记录"
+                                    Height="44" Click="OfflineButton_Click" />
+                        </Grid>
                         <TextBlock x:Name="LoginStatusText" Text="直连 SSO，仅用于获取当前会话 token"
                                    Style="{StaticResource MutedTextStyle}" HorizontalAlignment="Center" Margin="0,13,0,0" />
                     </StackPanel>

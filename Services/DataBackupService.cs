@@ -313,6 +313,7 @@ public sealed class DataBackupService
                 cancellationToken);
             goal.Expenses ??= [];
             goal.CompletedGoals ??= [];
+            FinancialGoalService.PrepareForUse(goal);
             var evidence = new Dictionary<DateOnly, DailyEvidence>();
             foreach (var entry in archive.Entries.Where(item =>
                          item.FullName.StartsWith("evidence/", StringComparison.Ordinal) &&
@@ -445,9 +446,19 @@ public sealed class DataBackupService
             if (!mergedCompletedGoals.ContainsKey(completedGoal.Id) || useBackup)
                 mergedCompletedGoals[completedGoal.Id] = completedGoal;
         }
+        var mergedGoalProfiles = localGoal.Goals
+            .GroupBy(item => item.Id, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Last(), StringComparer.Ordinal);
+        foreach (var goalProfile in package.Goal.Goals)
+        {
+            if (!mergedGoalProfiles.ContainsKey(goalProfile.Id) || useBackup)
+                mergedGoalProfiles[goalProfile.Id] = goalProfile;
+        }
         var mergedGoal = new FinancialGoalData
         {
-            Version = 4,
+            Version = 5,
+            ActiveGoalId = useBackupGoalSettings ? package.Goal.ActiveGoalId : localGoal.ActiveGoalId,
+            Goals = mergedGoalProfiles.Values.OrderByDescending(item => item.CreatedAt).ToList(),
             GoalName = useBackupGoalSettings ? package.Goal.GoalName : localGoal.GoalName,
             TargetAmount = useBackupGoalSettings ? package.Goal.TargetAmount : localGoal.TargetAmount,
             StartDate = useBackupGoalSettings ? package.Goal.StartDate : localGoal.StartDate,
@@ -659,6 +670,7 @@ public sealed class DataBackupService
                     ?? new AppSettings();
         clone.AutoLoginEnabled = false;
         clone.LastUsername = string.Empty;
+        clone.LastAuthenticatedUsername = string.Empty;
         return clone;
     }
 
@@ -666,15 +678,18 @@ public sealed class DataBackupService
     {
         var autoLogin = target.AutoLoginEnabled;
         var lastUsername = target.LastUsername;
+        var lastAuthenticatedUsername = target.LastAuthenticatedUsername;
         foreach (var property in typeof(AppSettings).GetProperties(BindingFlags.Instance | BindingFlags.Public)
                      .Where(property => property.CanRead && property.CanWrite &&
                                         property.Name is not nameof(AppSettings.AutoLoginEnabled) and
-                                            not nameof(AppSettings.LastUsername)))
+                                            not nameof(AppSettings.LastUsername) and
+                                            not nameof(AppSettings.LastAuthenticatedUsername)))
         {
             property.SetValue(target, property.GetValue(source));
         }
         target.AutoLoginEnabled = autoLogin;
         target.LastUsername = lastUsername;
+        target.LastAuthenticatedUsername = lastAuthenticatedUsername;
     }
 
     private static bool JsonEquals<T>(T left, T right) =>
@@ -706,10 +721,11 @@ public sealed class DataBackupService
     private static bool GoalSettingsEqual(FinancialGoalData left, FinancialGoalData right) =>
         left.GoalName == right.GoalName && left.TargetAmount == right.TargetAmount &&
         left.StartDate == right.StartDate && left.IncludeMealAllowance == right.IncludeMealAllowance &&
-        left.SuppressAutomaticCompletion == right.SuppressAutomaticCompletion;
+        left.SuppressAutomaticCompletion == right.SuppressAutomaticCompletion &&
+        left.ActiveGoalId == right.ActiveGoalId && JsonEquals(left.Goals, right.Goals);
 
     private static bool HasGoal(FinancialGoalData goal) =>
-        !string.IsNullOrWhiteSpace(goal.GoalName) || goal.TargetAmount > 0;
+        goal.Goals.Count > 0 || !string.IsNullOrWhiteSpace(goal.GoalName) || goal.TargetAmount > 0;
 
     private static void ValidatePassword(string password, bool creating)
     {

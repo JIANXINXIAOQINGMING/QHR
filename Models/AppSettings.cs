@@ -28,6 +28,7 @@ public sealed class AppSettings
     public bool AutoSyncHolidays { get; set; } = true;
     public bool AutoLoginEnabled { get; set; } = true;
     public string LastUsername { get; set; } = string.Empty;
+    public string LastAuthenticatedUsername { get; set; } = string.Empty;
     public string QhrBaseUrl { get; set; } = "https://hr.quectel.com";
     public string HolidaySourceUrl { get; set; } = "https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/{year}.json";
 }

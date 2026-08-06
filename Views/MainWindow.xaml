@@ -42,7 +42,7 @@
                                     <MenuItem.Header>
                                         <StackPanel Margin="4,3,4,5">
                                             <TextBlock x:Name="ProfileMenuUsernameText" Text="用户" FontWeight="SemiBold" />
-                                            <TextBlock Text="QHR 已连接" Foreground="{StaticResource SuccessBrush}" FontSize="11" Margin="0,3,0,0" />
+                                            <TextBlock x:Name="ProfileConnectionStatusText" Text="QHR 已连接" Foreground="{StaticResource SuccessBrush}" FontSize="11" Margin="0,3,0,0" />
                                         </StackPanel>
                                     </MenuItem.Header>
                                 </MenuItem>
@@ -54,14 +54,14 @@
                                 <MenuItem Header="备份全部数据" Click="BackupAllDataMenuItem_Click" />
                                 <MenuItem Header="导入备份" Click="ImportBackupMenuItem_Click" />
                                 <Separator />
-                                <MenuItem x:Name="VersionMenuItem" Header="版本 v1.3.24" IsEnabled="False" />
+                                <MenuItem x:Name="VersionMenuItem" Header="版本 v1.3.25" IsEnabled="False" />
                                 <MenuItem Header="退出登录" Foreground="{StaticResource DangerBrush}" Click="LogoutButton_Click" />
                             </ContextMenu>
                         </Button.ContextMenu>
                         <StackPanel Orientation="Horizontal">
                             <StackPanel VerticalAlignment="Center" Margin="0,0,10,0">
                                 <TextBlock x:Name="HeaderUsernameText" Text="用户" FontWeight="SemiBold" HorizontalAlignment="Right" />
-                                <TextBlock Text="在线" Foreground="{StaticResource SuccessBrush}" FontSize="10" HorizontalAlignment="Right" />
+                                <TextBlock x:Name="HeaderConnectionStatusText" Text="在线" Foreground="{StaticResource SuccessBrush}" FontSize="10" HorizontalAlignment="Right" />
                             </StackPanel>
                             <Border Width="36" Height="36" CornerRadius="18" Background="{StaticResource BrandBrush}">
                                 <TextBlock x:Name="AvatarText" Text="U" Foreground="White" FontWeight="Bold"
@@ -891,7 +891,7 @@
                         <ScrollViewer VerticalScrollBarVisibility="Auto">
                             <StackPanel Margin="8,5,8,18">
                                 <TextBlock Text="加班目标" Style="{StaticResource PageTitleStyle}" />
-                                <TextBlock Text="用加班费追踪一个购买目标；额外消费会从已积累的有效金额中扣除。"
+                                <TextBlock Text="可同时保留多个购买目标，并指定一个当前生效目标；额外消费会从已积累的有效金额中扣除。"
                                            Style="{StaticResource MutedTextStyle}" Margin="0,7,0,18" />
 
                                 <UniformGrid Columns="4" Margin="0,0,0,16">
@@ -946,6 +946,56 @@
                                             </StackPanel>
                                         </Border>
                                     </Grid>
+                                </Border>
+
+                                <Border Style="{StaticResource GlassCardStyle}" Padding="22" Margin="0,0,0,16">
+                                    <StackPanel>
+                                        <Grid>
+                                            <StackPanel>
+                                                <TextBlock Text="全部目标" Style="{StaticResource SectionTitleStyle}" />
+                                                <TextBlock x:Name="GoalsSummaryText" Text="暂无目标，请在下方新增"
+                                                           Style="{StaticResource MutedTextStyle}" Margin="0,5,0,0" />
+                                            </StackPanel>
+                                            <Button Content="新增目标" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                    Padding="16,8" Style="{StaticResource AccentButtonStyle}"
+                                                    Click="NewGoalButton_Click" />
+                                        </Grid>
+                                        <ItemsControl x:Name="GoalsItemsControl" Margin="0,16,0,0">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border Background="#52FFFFFF" BorderBrush="{StaticResource LineBrush}"
+                                                            BorderThickness="1" CornerRadius="13" Padding="17" Margin="0,0,0,10"
+                                                            Cursor="Hand" MouseLeftButtonUp="GoalCard_MouseLeftButtonUp">
+                                                        <Grid>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="*" />
+                                                                <ColumnDefinition Width="Auto" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <StackPanel>
+                                                                <StackPanel Orientation="Horizontal">
+                                                                    <TextBlock Text="{Binding GoalName}" FontSize="17" FontWeight="SemiBold" />
+                                                                    <Border Margin="10,0,0,0" Padding="9,3" CornerRadius="9" Background="#181473E6">
+                                                                        <TextBlock Text="{Binding StatusText}" Foreground="{StaticResource AccentBrush}"
+                                                                                   FontSize="11" FontWeight="SemiBold" />
+                                                                    </Border>
+                                                                </StackPanel>
+                                                                <TextBlock Text="{Binding TargetAmountText}" FontSize="18" FontWeight="SemiBold"
+                                                                           Foreground="{StaticResource AccentBrush}" Margin="0,9,0,0" />
+                                                                <TextBlock Text="{Binding StartDateText}" Style="{StaticResource MutedTextStyle}" Margin="0,5,0,0" />
+                                                                <TextBlock Text="{Binding ActivationSummaryText}" Style="{StaticResource MutedTextStyle}" Margin="0,3,0,0" />
+                                                            </StackPanel>
+                                                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="20,0,0,0">
+                                                                <Button Content="编辑" Padding="11,5" Margin="0,0,7,0"
+                                                                        Click="EditGoalButton_Click" />
+                                                                <Button Content="设为当前" Padding="11,5" Foreground="{StaticResource AccentBrush}"
+                                                                        Click="SetActiveGoalButton_Click" />
+                                                            </StackPanel>
+                                                        </Grid>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
                                 </Border>
 
                                 <Border x:Name="CompletedGoalsBorder" Visibility="Collapsed"
@@ -1005,7 +1055,11 @@
 
                                 <Border Style="{StaticResource GlassCardStyle}" Padding="22" Margin="0,0,0,16">
                                     <StackPanel>
-                                        <TextBlock Text="目标设置" Style="{StaticResource SectionTitleStyle}" Margin="0,0,0,16" />
+                                        <Grid Margin="0,0,0,16">
+                                            <TextBlock x:Name="GoalEditorTitleText" Text="新增目标" Style="{StaticResource SectionTitleStyle}" />
+                                            <Button Content="新建另一个目标" HorizontalAlignment="Right" Padding="12,5"
+                                                    Click="NewGoalButton_Click" />
+                                        </Grid>
                                         <Grid>
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="1.6*" />
@@ -1039,7 +1093,7 @@
                                             <StackPanel Grid.Column="7" Orientation="Horizontal" Margin="16,25,0,0">
                                                 <Button Content="保存目标" Style="{StaticResource AccentButtonStyle}"
                                                         Click="SaveGoalButton_Click" />
-                                                <Button x:Name="DeleteCurrentGoalButton" Content="删除当前目标"
+                                                <Button x:Name="DeleteCurrentGoalButton" Content="删除此目标"
                                                         Margin="8,0,0,0" Foreground="{StaticResource DangerBrush}"
                                                         Click="DeleteCurrentGoalButton_Click" />
                                             </StackPanel>
@@ -1456,6 +1510,53 @@
                             </Border>
                         </StackPanel>
                     </ScrollViewer>
+                </Border>
+            </Border>
+
+            <Border x:Name="GoalHistoryOverlay" Grid.Row="1" Panel.ZIndex="125" Visibility="Collapsed"
+                    Background="#8A0C1726" IsHitTestVisible="True">
+                <Border Width="720" MaxHeight="620" Padding="28" HorizontalAlignment="Center" VerticalAlignment="Center"
+                        Style="{StaticResource GlassCardStyle}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Grid>
+                            <StackPanel>
+                                <TextBlock x:Name="GoalHistoryNameText" Text="目标生效记录" FontSize="22" FontWeight="SemiBold" />
+                                <TextBlock x:Name="GoalHistorySummaryText" Style="{StaticResource MutedTextStyle}"
+                                           Margin="0,6,45,0" TextWrapping="Wrap" />
+                            </StackPanel>
+                            <Button Content="×" Width="34" Height="34" Padding="0" HorizontalAlignment="Right"
+                                    VerticalAlignment="Top" Background="Transparent" BorderThickness="0" Effect="{x:Null}"
+                                    FontSize="22" Click="CloseGoalHistoryButton_Click" />
+                        </Grid>
+                        <ScrollViewer Grid.Row="1" Margin="0,22,0,0" VerticalScrollBarVisibility="Auto">
+                            <StackPanel>
+                                <TextBlock x:Name="GoalHistoryEmptyText" Text="这个目标还没有生效记录。设为当前目标后会从当时开始记录。"
+                                           Style="{StaticResource MutedTextStyle}" Visibility="Collapsed" TextWrapping="Wrap" />
+                                <ItemsControl x:Name="GoalHistoryItemsControl">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Background="#52FFFFFF" BorderBrush="{StaticResource LineBrush}"
+                                                    BorderThickness="1" CornerRadius="12" Padding="15" Margin="0,0,0,9">
+                                                <Grid>
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding DateRangeText}" FontWeight="SemiBold" />
+                                                        <TextBlock Text="{Binding ResultText}" Style="{StaticResource MutedTextStyle}" Margin="0,5,0,0" />
+                                                    </StackPanel>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </ScrollViewer>
+                        <Button Grid.Row="2" Content="关闭" Padding="20,8" Margin="0,20,0,0"
+                                HorizontalAlignment="Right" Click="CloseGoalHistoryButton_Click" />
+                    </Grid>
                 </Border>
             </Border>
 

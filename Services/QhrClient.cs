@@ -22,17 +22,20 @@ public sealed class QhrClient : IDisposable
     private readonly Uri _baseUri;
     private readonly string _token;
     private readonly EncryptedAttendanceCache? _attendanceCache;
+    private readonly bool _offlineOnly;
     private readonly HashSet<DateOnly> _monthsFetchedThisSession = [];
     private string _cookieHeader = string.Empty;
 
     public QhrClient(
         string baseUrl,
         string token,
-        EncryptedAttendanceCache? attendanceCache = null)
+        EncryptedAttendanceCache? attendanceCache = null,
+        bool offlineOnly = false)
     {
         _baseUri = new Uri(baseUrl.TrimEnd('/') + "/");
         _token = NormalizeToken(token);
         _attendanceCache = attendanceCache;
+        _offlineOnly = offlineOnly;
         var handler = new HttpClientHandler
         {
             AllowAutoRedirect = false,
@@ -43,6 +46,7 @@ public sealed class QhrClient : IDisposable
     }
 
     public bool IsLoggedIn => _cookieHeader.Length > 0;
+    public bool IsOfflineMode => _offlineOnly;
     public string LastCacheStatus { get; private set; } = "本地加密档案尚无数据";
 
     public async Task<(IReadOnlyList<AttendanceRecord> Records, bool HasAllRequestedMonths)> LoadCachedAttendanceAsync(
@@ -147,6 +151,17 @@ public sealed class QhrClient : IDisposable
             {
                 LastCacheStatus = "本地加密档案读取失败";
             }
+        }
+
+        if (_offlineOnly)
+        {
+            var localResult = cachedRecords
+                .Where(item => item.Date >= startDate && item.Date <= endDate)
+                .OrderBy(item => item.Date)
+                .ToArray();
+            LastCacheStatus = $"离线模式 · 本地加密档案 {localResult.Length} 天";
+            progress?.Report(LastCacheStatus);
+            return localResult;
         }
 
         var rawRecords = new List<CardLog>();

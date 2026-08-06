@@ -36,6 +36,7 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<SummaryRow> _yearlyRecords = [];
     private readonly ObservableCollection<SummaryRow> _analyticsYearRecords = [];
     private readonly ObservableCollection<GoalExpense> _goalExpenses = [];
+    private readonly ObservableCollection<FinancialGoalProfile> _goals = [];
     private readonly ObservableCollection<CompletedFinancialGoal> _completedGoals = [];
     private readonly ObservableCollection<GoalExpense> _selectedDayExpenses = [];
     private readonly ObservableCollection<EvidenceImageItem> _dayEvidenceImages = [];
@@ -62,6 +63,7 @@ public partial class MainWindow : Window
     private DateOnly? _openedExpenseDate;
     private string? _editingExpenseId;
     private string? _editingCompletedGoalId;
+    private string? _editingGoalId;
     private decimal? _expenseCalculatorAccumulator;
     private string? _expenseCalculatorPendingOperator;
     private bool _expenseCalculatorEnteringNewValue = true;
@@ -87,6 +89,14 @@ public partial class MainWindow : Window
         HeaderUsernameText.Text = GetDisplayName(username);
         ProfileMenuUsernameText.Text = GetDisplayName(username);
         AvatarText.Text = GetAvatarText(username);
+        if (_qhrClient.IsOfflineMode)
+        {
+            HeaderStatusText.Text = "离线模式 · 正在读取本地加密档案";
+            HeaderConnectionStatusText.Text = "离线";
+            HeaderConnectionStatusText.Foreground = FindResource("WarningBrush") as Brush;
+            ProfileConnectionStatusText.Text = "离线查看本地记录";
+            ProfileConnectionStatusText.Foreground = FindResource("WarningBrush") as Brush;
+        }
         VersionMenuItem.Header = $"版本 v{LocalUpdateService.CurrentDisplayVersion}";
         var today = DateTime.Today;
         OverviewYearComboBox.ItemsSource = Enumerable.Range(today.Year - 9, 10).Reverse().ToArray();
@@ -100,6 +110,7 @@ public partial class MainWindow : Window
         AnalyticsYearComboBox.ItemsSource = Enumerable.Range(today.Year - 9, 10).Reverse().ToArray();
         AnalyticsYearComboBox.SelectedItem = today.Year;
         ExpenseDayItemsControl.ItemsSource = _selectedDayExpenses;
+        GoalsItemsControl.ItemsSource = _goals;
         CompletedGoalsItemsControl.ItemsSource = _completedGoals;
         DayEvidenceItemsControl.ItemsSource = _dayEvidenceImages;
         LoadSettingsIntoControls();
@@ -181,7 +192,9 @@ public partial class MainWindow : Window
             MergeCurrentRangeIntoAnalysis(startDate, endDate);
             RecalculateCurrentResults();
             if (_analysisLoadedOn is not null) RecalculateAnalysisResults();
-            HeaderStatusText.Text = $"更新完成 · {DateTime.Now:HH:mm} · {_qhrClient.LastCacheStatus}";
+            HeaderStatusText.Text = _qhrClient.IsOfflineMode
+                ? $"离线查看 · {_qhrClient.LastCacheStatus}"
+                : $"更新完成 · {DateTime.Now:HH:mm} · {_qhrClient.LastCacheStatus}";
         }
         catch (Exception ex)
         {
@@ -908,17 +921,41 @@ public partial class MainWindow : Window
             _goalData.StartDate = new DateOnly(today.Year, 1, 1);
         }
         _goalLoaded = true;
-        GoalNameTextBox.Text = _goalData.GoalName;
-        GoalTargetAmountTextBox.Text = _goalData.TargetAmount > 0
-            ? _goalData.TargetAmount.ToString(CultureInfo.InvariantCulture)
-            : string.Empty;
-        GoalStartDatePicker.SelectedDate = _goalData.StartDate.ToDateTime(TimeOnly.MinValue);
-        GoalIncomeModeComboBox.SelectedIndex = _goalData.IncludeMealAllowance ? 1 : 0;
+        RefreshGoalProfiles();
+        _editingGoalId = _goalData.ActiveGoalId;
+        LoadGoalEditor(_goalData.ActiveGoal);
         ReplaceItems(_goalExpenses, _goalData.Expenses.OrderByDescending(item => item.Date));
         ReplaceItems(_completedGoals, _goalData.CompletedGoals.OrderByDescending(item => item.CompletedDate));
         UpdateCompletedGoalsVisibility();
         GoalStatusText.Text = "目标与消费记录已从本地加密档案载入";
         UpdateGoalSummary();
+    }
+
+    private void RefreshGoalProfiles()
+    {
+        foreach (var goal in _goalData.Goals)
+        {
+            goal.IsActive = goal.Id == _goalData.ActiveGoalId;
+        }
+        ReplaceItems(_goals, _goalData.Goals
+            .OrderByDescending(item => item.IsActive)
+            .ThenByDescending(item => item.CreatedAt));
+        GoalsSummaryText.Text = _goals.Count == 0
+            ? "暂无目标，请在下方新增"
+            : $"共 {_goals.Count} 个目标 · {(_goalData.ActiveGoal is null ? "当前没有生效目标" : $"当前：{_goalData.ActiveGoal.GoalName}")}";
+    }
+
+    private void LoadGoalEditor(FinancialGoalProfile? goal)
+    {
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        GoalEditorTitleText.Text = goal is null ? "新增目标" : $"编辑目标 · {goal.GoalName}";
+        GoalNameTextBox.Text = goal?.GoalName ?? string.Empty;
+        GoalTargetAmountTextBox.Text = goal is { TargetAmount: > 0 }
+            ? goal.TargetAmount.ToString(CultureInfo.InvariantCulture)
+            : string.Empty;
+        GoalStartDatePicker.SelectedDate = (goal?.StartDate ?? today).ToDateTime(TimeOnly.MinValue);
+        GoalIncomeModeComboBox.SelectedIndex = goal?.IncludeMealAllowance == true ? 1 : 0;
+        DeleteCurrentGoalButton.IsEnabled = goal is not null;
     }
 
     private async Task EnsureAnalyticsDataAsync()
@@ -1023,7 +1060,7 @@ public partial class MainWindow : Window
                 ? $"按当前平均 ¥{averageHourlyRate:N2}/h，预计还需加班 {Math.Ceiling((double)remaining / averageHourlyRate):N0} 小时"
                 : "已有加班数据后可估算剩余加班时长";
         DeleteCurrentGoalButton.IsEnabled =
-            target > 0 || !string.IsNullOrWhiteSpace(_goalData.GoalName);
+            _goalData.Goals.Any(item => item.Id == _editingGoalId);
         UpdateExpenseCalendar();
 
         if (target > 0 && !string.IsNullOrWhiteSpace(_goalData.GoalName) &&
@@ -1061,6 +1098,12 @@ public partial class MainWindow : Window
         _isCompletingGoal = true;
         try
         {
+            var completedProfileId = _goalData.ActiveGoalId;
+            var completedProfile = _goalData.ActiveGoal;
+            if (completedProfile is not null)
+            {
+                CloseOpenGoalPeriod(completedProfile, DateTimeOffset.Now, "目标已完成");
+            }
             var history = _goalData.CompletedGoals
                 .Where(item => item.Id != completedGoal.Id)
                 .Prepend(completedGoal)
@@ -1069,7 +1112,9 @@ public partial class MainWindow : Window
             var today = DateOnly.FromDateTime(DateTime.Today);
             var nextGoalData = new FinancialGoalData
             {
-                Version = 4,
+                Version = 5,
+                ActiveGoalId = null,
+                Goals = _goalData.Goals.Where(item => item.Id != completedProfileId).ToList(),
                 GoalName = string.Empty,
                 TargetAmount = 0,
                 StartDate = new DateOnly(today.Year, 1, 1),
@@ -1082,11 +1127,10 @@ public partial class MainWindow : Window
             await _financialGoalService.SaveAsync(nextGoalData);
             _goalData = nextGoalData;
             _goalExpenses.Clear();
+            RefreshGoalProfiles();
             ReplaceItems(_completedGoals, history);
-            GoalNameTextBox.Clear();
-            GoalTargetAmountTextBox.Clear();
-            GoalStartDatePicker.SelectedDate = nextGoalData.StartDate.ToDateTime(TimeOnly.MinValue);
-            GoalIncomeModeComboBox.SelectedIndex = 0;
+            _editingGoalId = null;
+            LoadGoalEditor(null);
             GoalStatusText.Text = $"“{completedGoal.GoalName}”已完成并移入历史目标";
             UpdateCompletedGoalsVisibility();
             UpdateGoalSummary();
@@ -1258,7 +1302,7 @@ public partial class MainWindow : Window
                 .ToList();
             var previousHistory = _goalData.CompletedGoals;
             _goalData.CompletedGoals = history;
-            _goalData.Version = 4;
+            _goalData.Version = 5;
             try
             {
                 await _financialGoalService.SaveAsync(_goalData);
@@ -1287,7 +1331,7 @@ public partial class MainWindow : Window
         try
         {
             await EnsureGoalDataAsync();
-            if (!string.IsNullOrWhiteSpace(_goalData.GoalName) || _goalData.TargetAmount > 0)
+            if (_goalData.ActiveGoal is not null)
             {
                 MessageBox.Show(this, "当前已有目标，请先完成或清理当前目标后再恢复历史目标。",
                     "无法设为当前目标", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -1308,9 +1352,21 @@ public partial class MainWindow : Window
                 .Select(group => group.Last())
                 .OrderByDescending(item => item.Date)
                 .ToList();
+            var restoredProfile = new FinancialGoalProfile
+            {
+                GoalName = goal.GoalName,
+                TargetAmount = goal.TargetAmount,
+                StartDate = goal.StartDate,
+                IncludeMealAllowance = goal.IncludedMealAllowance,
+                SuppressAutomaticCompletion = true,
+                CreatedAt = DateTimeOffset.Now,
+                ActivationPeriods = [new GoalActivationPeriod { StartedAt = DateTimeOffset.Now }]
+            };
             var restoredData = new FinancialGoalData
             {
-                Version = 4,
+                Version = 5,
+                ActiveGoalId = restoredProfile.Id,
+                Goals = _goalData.Goals.Append(restoredProfile).ToList(),
                 GoalName = goal.GoalName,
                 TargetAmount = goal.TargetAmount,
                 StartDate = goal.StartDate,
@@ -1321,12 +1377,11 @@ public partial class MainWindow : Window
             };
             await _financialGoalService.SaveAsync(restoredData);
             _goalData = restoredData;
+            _editingGoalId = restoredProfile.Id;
+            RefreshGoalProfiles();
             ReplaceItems(_goalExpenses, restoredData.Expenses);
             ReplaceItems(_completedGoals, history);
-            GoalNameTextBox.Text = restoredData.GoalName;
-            GoalTargetAmountTextBox.Text = restoredData.TargetAmount.ToString("0.##", CultureInfo.InvariantCulture);
-            GoalStartDatePicker.SelectedDate = restoredData.StartDate.ToDateTime(TimeOnly.MinValue);
-            GoalIncomeModeComboBox.SelectedIndex = restoredData.IncludeMealAllowance ? 1 : 0;
+            LoadGoalEditor(restoredProfile);
             if (restoredData.Expenses.Count > 0)
             {
                 var latestExpenseDate = restoredData.Expenses.Max(item => item.Date);
@@ -1369,14 +1424,48 @@ public partial class MainWindow : Window
             if (startDate < today.AddYears(-10)) throw new ArgumentException("起算日最多可追溯 10 年");
 
             var requiresEarlierHistory = _analysisStartDate is null || startDate < _analysisStartDate.Value;
-            _goalData.GoalName = goalName;
-            _goalData.TargetAmount = target;
-            _goalData.StartDate = startDate;
-            _goalData.IncludeMealAllowance = GoalIncomeModeComboBox.SelectedIndex == 1;
-            _goalData.SuppressAutomaticCompletion = false;
+            var goal = _goalData.Goals.FirstOrDefault(item => item.Id == _editingGoalId);
+            var isNew = goal is null;
+            if (goal is null)
+            {
+                goal = new FinancialGoalProfile
+                {
+                    CreatedAt = DateTimeOffset.Now
+                };
+                _goalData.Goals.Add(goal);
+                _editingGoalId = goal.Id;
+            }
+
+            goal.GoalName = goalName;
+            goal.TargetAmount = decimal.Round(target, 2, MidpointRounding.AwayFromZero);
+            goal.StartDate = startDate;
+            goal.IncludeMealAllowance = GoalIncomeModeComboBox.SelectedIndex == 1;
+            goal.SuppressAutomaticCompletion = false;
+            goal.ActivationPeriods ??= [];
+
+            var becameActive = false;
+            if (_goalData.ActiveGoal is null)
+            {
+                _goalData.ActiveGoalId = goal.Id;
+                goal.ActivationPeriods.Add(new GoalActivationPeriod
+                {
+                    StartedAt = GetInitialGoalActivationTime(startDate)
+                });
+                becameActive = true;
+            }
+            if (_goalData.ActiveGoalId == goal.Id)
+            {
+                FinancialGoalService.ApplyActiveGoalToLegacy(_goalData);
+            }
             _goalData.Expenses = _goalExpenses.ToList();
             await _financialGoalService.SaveAsync(_goalData);
-            GoalStatusText.Text = "目标已加密保存";
+            RefreshGoalProfiles();
+            LoadGoalEditor(goal);
+            GoalStatusText.Text = isNew
+                ? becameActive
+                    ? $"已新增“{goalName}”并设为当前生效目标"
+                    : $"已新增“{goalName}”；可在目标列表中设为当前目标"
+                : $"目标“{goalName}”已加密保存";
             if (requiresEarlierHistory)
             {
                 _analysisLoadedOn = null;
@@ -1398,49 +1487,154 @@ public partial class MainWindow : Window
         try
         {
             await EnsureGoalDataAsync();
-            if (_goalData.TargetAmount <= 0 && string.IsNullOrWhiteSpace(_goalData.GoalName))
+            var goal = _goalData.Goals.FirstOrDefault(item => item.Id == _editingGoalId);
+            if (goal is null)
             {
-                MessageBox.Show(this, "当前没有可删除的目标。", "删除当前目标",
+                MessageBox.Show(this, "请先从目标列表中选择要删除的目标。", "删除目标",
                     MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
-            var displayName = string.IsNullOrWhiteSpace(_goalData.GoalName)
-                ? "当前目标"
-                : $"“{_goalData.GoalName}”";
             if (MessageBox.Show(this,
-                    $"确定删除{displayName}吗？\n\n消费账本和历史已完成目标都会保留，删除后即可把历史目标恢复为当前目标。",
-                    "删除当前目标", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                    $"确定删除“{goal.GoalName}”吗？\n\n消费账本、其他目标和历史已完成目标都会保留。",
+                    "删除目标", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
                 return;
 
-            var today = DateOnly.FromDateTime(DateTime.Today);
-            var clearedData = new FinancialGoalData
+            if (_goalData.ActiveGoalId == goal.Id)
             {
-                Version = 4,
-                GoalName = string.Empty,
-                TargetAmount = 0,
-                StartDate = new DateOnly(today.Year, 1, 1),
-                IncludeMealAllowance = false,
-                SuppressAutomaticCompletion = false,
-                Expenses = _goalExpenses.ToList(),
-                CompletedGoals = _goalData.CompletedGoals
-                    .OrderByDescending(item => item.CompletedDate)
-                    .ToList()
-            };
-
-            await _financialGoalService.SaveAsync(clearedData);
-            _goalData = clearedData;
-            GoalNameTextBox.Clear();
-            GoalTargetAmountTextBox.Clear();
-            GoalStartDatePicker.SelectedDate = clearedData.StartDate.ToDateTime(TimeOnly.MinValue);
-            GoalIncomeModeComboBox.SelectedIndex = 0;
-            GoalStatusText.Text = "当前目标已删除；消费账本和历史目标均已保留";
+                _goalData.ActiveGoalId = null;
+                FinancialGoalService.ApplyActiveGoalToLegacy(_goalData);
+            }
+            _goalData.Goals.Remove(goal);
+            _goalData.Expenses = _goalExpenses.ToList();
+            await _financialGoalService.SaveAsync(_goalData);
+            _editingGoalId = null;
+            RefreshGoalProfiles();
+            LoadGoalEditor(null);
+            GoalStatusText.Text = $"目标“{goal.GoalName}”已删除；其他数据均已保留";
             UpdateGoalSummary();
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "无法删除当前目标", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, ex.Message, "无法删除目标", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
+    }
+
+    private void NewGoalButton_Click(object sender, RoutedEventArgs e)
+    {
+        _editingGoalId = null;
+        LoadGoalEditor(null);
+        GoalStatusText.Text = "正在新增目标；保存后会保留现有目标";
+        GoalNameTextBox.Focus();
+    }
+
+    private void EditGoalButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { DataContext: FinancialGoalProfile goal }) return;
+        _editingGoalId = goal.Id;
+        LoadGoalEditor(goal);
+        GoalStatusText.Text = $"正在编辑“{goal.GoalName}”";
+        GoalNameTextBox.Focus();
+    }
+
+    private async void SetActiveGoalButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { DataContext: FinancialGoalProfile goal }) return;
+        try
+        {
+            await EnsureGoalDataAsync();
+            if (_goalData.ActiveGoalId == goal.Id)
+            {
+                GoalStatusText.Text = $"“{goal.GoalName}”已经是当前生效目标";
+                return;
+            }
+
+            var previous = _goalData.ActiveGoal;
+            var now = DateTimeOffset.Now;
+            FinancialGoalService.CaptureActiveGoalFromLegacy(_goalData);
+            if (previous is not null)
+            {
+                CloseOpenGoalPeriod(previous, now, "被替换", goal.Id, goal.GoalName);
+            }
+
+            goal.ActivationPeriods ??= [];
+            goal.ActivationPeriods.Add(new GoalActivationPeriod { StartedAt = now });
+            _goalData.ActiveGoalId = goal.Id;
+            FinancialGoalService.ApplyActiveGoalToLegacy(_goalData);
+            await _financialGoalService.SaveAsync(_goalData);
+
+            _editingGoalId = goal.Id;
+            RefreshGoalProfiles();
+            LoadGoalEditor(goal);
+            GoalStatusText.Text = previous is null
+                ? $"“{goal.GoalName}”已设为当前生效目标"
+                : $"“{previous.GoalName}”已于 {now:yyyy-MM-dd HH:mm} 被“{goal.GoalName}”替换";
+
+            if (_analysisStartDate is null || goal.StartDate < _analysisStartDate.Value)
+            {
+                _analysisLoadedOn = null;
+                await EnsureAnalyticsDataAsync();
+            }
+            else
+            {
+                UpdateGoalSummary();
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "无法切换当前目标", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void GoalCard_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not Border { DataContext: FinancialGoalProfile goal }) return;
+        ShowGoalHistory(goal);
+    }
+
+    private void ShowGoalHistory(FinancialGoalProfile goal)
+    {
+        GoalHistoryNameText.Text = goal.GoalName;
+        GoalHistorySummaryText.Text =
+            $"{goal.TargetAmountText} · {goal.StartDateText} · {goal.IncomeModeText} · {goal.StatusText}";
+        var periods = goal.ActivationPeriods
+            .OrderByDescending(item => item.StartedAt)
+            .ToArray();
+        GoalHistoryItemsControl.ItemsSource = periods;
+        GoalHistoryEmptyText.Visibility = periods.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        GoalHistoryOverlay.Visibility = Visibility.Visible;
+    }
+
+    private void CloseGoalHistoryButton_Click(object sender, RoutedEventArgs e)
+    {
+        GoalHistoryOverlay.Visibility = Visibility.Collapsed;
+        GoalHistoryItemsControl.ItemsSource = null;
+    }
+
+    private static DateTimeOffset GetInitialGoalActivationTime(DateOnly startDate)
+    {
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        if (startDate >= today) return DateTimeOffset.Now;
+        var localStart = startDate.ToDateTime(TimeOnly.MinValue);
+        return new DateTimeOffset(localStart, TimeZoneInfo.Local.GetUtcOffset(localStart));
+    }
+
+    private static void CloseOpenGoalPeriod(
+        FinancialGoalProfile goal,
+        DateTimeOffset endedAt,
+        string reason,
+        string? replacedByGoalId = null,
+        string? replacedByGoalName = null)
+    {
+        var openPeriod = goal.ActivationPeriods
+            .Where(item => item.EndedAt is null)
+            .OrderByDescending(item => item.StartedAt)
+            .FirstOrDefault();
+        if (openPeriod is null) return;
+        openPeriod.EndedAt = endedAt < openPeriod.StartedAt ? openPeriod.StartedAt : endedAt;
+        openPeriod.EndReason = reason;
+        openPeriod.ReplacedByGoalId = replacedByGoalId;
+        openPeriod.ReplacedByGoalName = replacedByGoalName;
     }
 
     private async void AddExpenseButton_Click(object sender, RoutedEventArgs e)
@@ -2308,6 +2502,7 @@ public partial class MainWindow : Window
         {
             DayDetailOverlay.Visibility = Visibility.Collapsed;
             ExpenseDetailOverlay.Visibility = Visibility.Collapsed;
+            GoalHistoryOverlay.Visibility = Visibility.Collapsed;
             CompletedGoalEditOverlay.Visibility = Visibility.Collapsed;
             _editingCompletedGoalId = null;
         }
@@ -2657,6 +2852,7 @@ public partial class MainWindow : Window
         LoadSettingsIntoControls();
         DayDetailOverlay.Visibility = Visibility.Collapsed;
         ExpenseDetailOverlay.Visibility = Visibility.Collapsed;
+        GoalHistoryOverlay.Visibility = Visibility.Collapsed;
         CompletedGoalEditOverlay.Visibility = Visibility.Collapsed;
         _openedDetailDate = null;
         _openedExpenseDate = null;

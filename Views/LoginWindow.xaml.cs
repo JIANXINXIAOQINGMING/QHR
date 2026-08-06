@@ -34,6 +34,7 @@ public partial class LoginWindow : Window
 
     private async void LoginWindow_Loaded(object sender, RoutedEventArgs e)
     {
+        await UpdateOfflineAvailabilityAsync();
         if (!_settings.AutoLoginEnabled) return;
         try
         {
@@ -42,6 +43,7 @@ public partial class LoginWindow : Window
             {
                 _settings.AutoLoginEnabled = false;
                 RememberUsernameCheckBox.IsChecked = true;
+                if (await TryOpenOfflineAsync(false)) return;
                 LoginStatusText.Text = "首次登录成功后将启用自动登录";
                 return;
             }
@@ -54,6 +56,7 @@ public partial class LoginWindow : Window
         }
         catch (Exception ex)
         {
+            if (await TryOpenOfflineAsync(false)) return;
             ErrorTextBlock.Text = $"读取自动登录凭据失败：{GetFriendlyMessage(ex)}";
             ErrorBorder.Visibility = Visibility.Visible;
         }
@@ -106,21 +109,18 @@ public partial class LoginWindow : Window
             }
             _settings.AutoLoginEnabled = enableAutoLogin;
             _settings.LastUsername = username;
+            _settings.LastAuthenticatedUsername = displayUsername;
             await _settingsService.SaveAsync(_settings);
 
-            var mainWindow = new MainWindow(displayUsername, qhrClient, _settingsService, _settings);
+            OpenMainWindow(displayUsername, qhrClient);
             qhrClient = null;
-            Application.Current.MainWindow = mainWindow;
-            Application.Current.ShutdownMode = ShutdownMode.OnMainWindowClose;
-            _authenticated = true;
-            mainWindow.Show();
-            Close();
         }
         catch (Exception ex)
         {
             qhrClient?.Dispose();
+            if (automatic && await TryOpenOfflineAsync(false)) return;
             ErrorTextBlock.Text = automatic
-                ? $"自动登录失败：{GetFriendlyMessage(ex)}"
+                ? $"自动登录失败：{GetFriendlyMessage(ex)} 可使用本地加密记录离线进入。"
                 : GetFriendlyMessage(ex);
             ErrorBorder.Visibility = Visibility.Visible;
             LoginStatusText.Text = automatic
@@ -131,7 +131,101 @@ public partial class LoginWindow : Window
         {
             _isLoggingIn = false;
             LoginButton.IsEnabled = true;
+            if (!_authenticated) await UpdateOfflineAvailabilityAsync();
         }
+    }
+
+    private async void OfflineButton_Click(object sender, RoutedEventArgs e) =>
+        await TryOpenOfflineAsync(true);
+
+    private async Task<bool> TryOpenOfflineAsync(bool showErrors)
+    {
+        var offlineUsername = GetOfflineUsername();
+        if (string.IsNullOrWhiteSpace(offlineUsername))
+        {
+            if (showErrors) ShowOfflineError("这台电脑还没有可识别的已登录账户，请先成功登录一次 QHR。");
+            return false;
+        }
+
+        try
+        {
+            OfflineButton.IsEnabled = false;
+            LoginStatusText.Text = "正在读取本地加密记录…";
+            var attendanceCache = new EncryptedAttendanceCache(_settingsService, offlineUsername);
+            var cachedRecords = await attendanceCache.LoadAsync();
+            var goalService = new FinancialGoalService(_settingsService, offlineUsername);
+            if (cachedRecords.Count == 0 && !File.Exists(goalService.StoragePath))
+            {
+                if (showErrors) ShowOfflineError("该账户尚未保存本地考勤或目标记录，暂时无法离线进入。");
+                return false;
+            }
+
+            var qhrClient = new QhrClient(_settings.QhrBaseUrl, string.Empty, attendanceCache, offlineOnly: true);
+            OpenMainWindow(offlineUsername, qhrClient);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            if (showErrors) ShowOfflineError($"无法读取本地加密记录：{GetFriendlyMessage(ex)}");
+            return false;
+        }
+        finally
+        {
+            if (!_authenticated) OfflineButton.IsEnabled = true;
+        }
+    }
+
+    private async Task UpdateOfflineAvailabilityAsync()
+    {
+        var offlineUsername = GetOfflineUsername();
+        if (string.IsNullOrWhiteSpace(offlineUsername))
+        {
+            OfflineButton.IsEnabled = false;
+            OfflineButton.ToolTip = "成功登录并保存过本地记录后可用";
+            return;
+        }
+
+        try
+        {
+            var attendanceCache = new EncryptedAttendanceCache(_settingsService, offlineUsername);
+            var records = await attendanceCache.LoadAsync();
+            var goalService = new FinancialGoalService(_settingsService, offlineUsername);
+            var available = records.Count > 0 || File.Exists(goalService.StoragePath);
+            OfflineButton.IsEnabled = available;
+            OfflineButton.ToolTip = available
+                ? $"以 {offlineUsername} 离线打开本地加密记录"
+                : "该账户尚无本地记录";
+        }
+        catch
+        {
+            OfflineButton.IsEnabled = false;
+            OfflineButton.ToolTip = "本地记录暂时无法读取";
+        }
+    }
+
+    private string GetOfflineUsername()
+    {
+        if (!string.IsNullOrWhiteSpace(_settings.LastAuthenticatedUsername))
+            return _settings.LastAuthenticatedUsername.Trim();
+        if (!string.IsNullOrWhiteSpace(_settings.LastUsername)) return _settings.LastUsername.Trim();
+        return UsernameTextBox.Text.Trim();
+    }
+
+    private void OpenMainWindow(string username, QhrClient qhrClient)
+    {
+        var mainWindow = new MainWindow(username, qhrClient, _settingsService, _settings);
+        Application.Current.MainWindow = mainWindow;
+        Application.Current.ShutdownMode = ShutdownMode.OnMainWindowClose;
+        _authenticated = true;
+        mainWindow.Show();
+        Close();
+    }
+
+    private void ShowOfflineError(string message)
+    {
+        ErrorTextBlock.Text = message;
+        ErrorBorder.Visibility = Visibility.Visible;
+        LoginStatusText.Text = "未找到可用的本地记录";
     }
 
     private void LoginModeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)

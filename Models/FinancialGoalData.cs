@@ -1,8 +1,14 @@
+using System.Text.Json.Serialization;
+
 namespace QHR.Models;
 
 public sealed class FinancialGoalData
 {
-    public int Version { get; set; } = 4;
+    public int Version { get; set; } = 5;
+    public string? ActiveGoalId { get; set; }
+    public List<FinancialGoalProfile> Goals { get; set; } = [];
+
+    // 下面字段继续作为当前目标的兼容镜像，保证旧备份和既有计算逻辑可以平滑迁移。
     public string GoalName { get; set; } = string.Empty;
     public decimal TargetAmount { get; set; }
     public DateOnly StartDate { get; set; } = new(DateTime.Today.Year, 1, 1);
@@ -10,6 +16,80 @@ public sealed class FinancialGoalData
     public bool SuppressAutomaticCompletion { get; set; }
     public List<GoalExpense> Expenses { get; set; } = [];
     public List<CompletedFinancialGoal> CompletedGoals { get; set; } = [];
+
+    [JsonIgnore]
+    public FinancialGoalProfile? ActiveGoal =>
+        Goals.FirstOrDefault(item => item.Id == ActiveGoalId);
+}
+
+public sealed class FinancialGoalProfile
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string GoalName { get; set; } = string.Empty;
+    public decimal TargetAmount { get; set; }
+    public DateOnly StartDate { get; set; } = DateOnly.FromDateTime(DateTime.Today);
+    public bool IncludeMealAllowance { get; set; }
+    public bool SuppressAutomaticCompletion { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.Now;
+    public List<GoalActivationPeriod> ActivationPeriods { get; set; } = [];
+
+    [JsonIgnore]
+    public bool IsActive { get; set; }
+
+    [JsonIgnore]
+    public string TargetAmountText => $"¥ {TargetAmount:N2}";
+
+    [JsonIgnore]
+    public string StartDateText => $"加班费起算日 {StartDate:yyyy-MM-dd}";
+
+    [JsonIgnore]
+    public string IncomeModeText => IncludeMealAllowance ? "加班费 + 餐补" : "仅加班费";
+
+    [JsonIgnore]
+    public string StatusText
+    {
+        get
+        {
+            if (IsActive) return "当前生效";
+            var latest = ActivationPeriods.OrderByDescending(item => item.StartedAt).FirstOrDefault();
+            if (latest is null) return "尚未生效";
+            return string.IsNullOrWhiteSpace(latest.EndReason) ? "已暂停" : latest.EndReason;
+        }
+    }
+
+    [JsonIgnore]
+    public string ActivationSummaryText
+    {
+        get
+        {
+            if (ActivationPeriods.Count == 0) return "暂无生效记录";
+            var latest = ActivationPeriods.OrderByDescending(item => item.StartedAt).First();
+            var suffix = ActivationPeriods.Count == 1 ? string.Empty : $" · 共 {ActivationPeriods.Count} 段";
+            return $"最近生效 {latest.StartedAt:yyyy-MM-dd HH:mm}{suffix}";
+        }
+    }
+}
+
+public sealed class GoalActivationPeriod
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public DateTimeOffset StartedAt { get; set; }
+    public DateTimeOffset? EndedAt { get; set; }
+    public string EndReason { get; set; } = string.Empty;
+    public string? ReplacedByGoalId { get; set; }
+    public string? ReplacedByGoalName { get; set; }
+
+    [JsonIgnore]
+    public string DateRangeText => EndedAt is DateTimeOffset endedAt
+        ? $"{StartedAt:yyyy-MM-dd HH:mm} 至 {endedAt:yyyy-MM-dd HH:mm}"
+        : $"{StartedAt:yyyy-MM-dd HH:mm} 至今";
+
+    [JsonIgnore]
+    public string ResultText => EndedAt is null
+        ? "当前生效中"
+        : !string.IsNullOrWhiteSpace(ReplacedByGoalName)
+            ? $"被“{ReplacedByGoalName}”替换"
+            : string.IsNullOrWhiteSpace(EndReason) ? "已结束" : EndReason;
 }
 
 public sealed class GoalExpense
