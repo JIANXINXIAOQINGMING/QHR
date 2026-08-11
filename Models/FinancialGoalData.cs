@@ -62,9 +62,10 @@ public sealed class FinancialGoalProfile
     {
         get
         {
-            if (ActivationPeriods.Count == 0) return "暂无生效记录";
-            var latest = ActivationPeriods.OrderByDescending(item => item.StartedAt).First();
-            var suffix = ActivationPeriods.Count == 1 ? string.Empty : $" · 共 {ActivationPeriods.Count} 段";
+            var allocatedPeriods = ActivationPeriods.Where(item => item.CountsTowardGoal).ToArray();
+            if (allocatedPeriods.Length == 0) return "暂无有效生效记录";
+            var latest = allocatedPeriods.OrderByDescending(item => item.StartedAt).First();
+            var suffix = allocatedPeriods.Length == 1 ? string.Empty : $" · 共 {allocatedPeriods.Length} 段";
             return $"最近生效 {latest.StartedAt:yyyy-MM-dd HH:mm}{suffix}";
         }
     }
@@ -78,6 +79,7 @@ public sealed class GoalActivationPeriod
     public string EndReason { get; set; } = string.Empty;
     public string? ReplacedByGoalId { get; set; }
     public string? ReplacedByGoalName { get; set; }
+    public bool CountsTowardGoal { get; set; } = true;
 
     [JsonIgnore]
     public string DateRangeText => EndedAt is DateTimeOffset endedAt
@@ -85,7 +87,9 @@ public sealed class GoalActivationPeriod
         : $"{StartedAt:yyyy-MM-dd HH:mm} 至今";
 
     [JsonIgnore]
-    public string ResultText => EndedAt is null
+    public string ResultText => !CountsTowardGoal
+        ? string.IsNullOrWhiteSpace(EndReason) ? "该段收入已转移" : EndReason
+        : EndedAt is null
         ? "当前生效中"
         : !string.IsNullOrWhiteSpace(ReplacedByGoalName)
             ? $"被“{ReplacedByGoalName}”替换"
@@ -95,6 +99,7 @@ public sealed class GoalActivationPeriod
 public sealed class GoalExpense
 {
     public string Id { get; init; } = Guid.NewGuid().ToString("N");
+    public string? GoalId { get; init; }
     public DateOnly Date { get; init; }
     public string Description { get; init; } = string.Empty;
     public decimal Amount { get; init; }
@@ -132,6 +137,9 @@ public sealed class CompletedFinancialGoal
     public string MealAllowanceText => $"¥ {MealAllowance:N2}";
     public string ExpenseAmountText => $"¥ {ExpenseAmount:N2}";
     public string EarnedAmountText => $"¥ {EarnedAmount:N2}";
+    public string EffectiveAmountText => $"¥ {EffectiveAmount:N2}";
+    public string CompletionCalculationText =>
+        $"实际有效金额 {EffectiveAmountText} = 累计收入 {EarnedAmountText} - 期间消费 {ExpenseAmountText}";
     public string IncomeModeText => IncludedMealAllowance ? "加班费 + 餐补" : "仅加班费";
     public string IncomeDetailText => $"加班费 {OvertimePayText} · 餐补 {MealAllowanceText} · {IncomeModeText}";
     public string OvertimeCompositionText =>

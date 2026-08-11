@@ -54,7 +54,7 @@
                                 <MenuItem Header="备份全部数据" Click="BackupAllDataMenuItem_Click" />
                                 <MenuItem Header="导入备份" Click="ImportBackupMenuItem_Click" />
                                 <Separator />
-                                <MenuItem x:Name="VersionMenuItem" Header="版本 v1.3.25" IsEnabled="False" />
+                                <MenuItem x:Name="VersionMenuItem" Header="版本 v1.3.26" IsEnabled="False" />
                                 <MenuItem Header="退出登录" Foreground="{StaticResource DangerBrush}" Click="LogoutButton_Click" />
                             </ContextMenu>
                         </Button.ContextMenu>
@@ -891,7 +891,7 @@
                         <ScrollViewer VerticalScrollBarVisibility="Auto">
                             <StackPanel Margin="8,5,8,18">
                                 <TextBlock Text="加班目标" Style="{StaticResource PageTitleStyle}" />
-                                <TextBlock Text="可同时保留多个购买目标，并指定一个当前生效目标；额外消费会从已积累的有效金额中扣除。"
+                                <TextBlock Text="可同时保留多个购买目标，并指定一个当前生效目标；消费归属于记录时的当前目标，追溯收入不会转移消费。"
                                            Style="{StaticResource MutedTextStyle}" Margin="0,7,0,18" />
 
                                 <UniformGrid Columns="4" Margin="0,0,0,16">
@@ -910,7 +910,7 @@
                                     </Border>
                                     <Border Style="{StaticResource GlassCardStyle}" Padding="18" Margin="0,0,12,0">
                                         <StackPanel>
-                                            <TextBlock Text="已记录消费" Style="{StaticResource MutedTextStyle}" />
+                                            <TextBlock Text="本目标消费" Style="{StaticResource MutedTextStyle}" />
                                             <TextBlock x:Name="GoalExpensesSummaryText" Text="¥ 0.00" FontSize="25" FontWeight="SemiBold"
                                                        Foreground="{StaticResource DangerBrush}" Margin="0,10,0,0" />
                                         </StackPanel>
@@ -1043,6 +1043,8 @@
                                                                 <StackPanel><TextBlock Text="累计收入" Style="{StaticResource MutedTextStyle}" /><TextBlock Text="{Binding EarnedAmountText}" Foreground="{StaticResource AccentBrush}" FontWeight="SemiBold" Margin="0,4,0,0" /></StackPanel>
                                                                 <StackPanel><TextBlock Text="期间消费" Style="{StaticResource MutedTextStyle}" /><TextBlock Text="{Binding ExpenseAmountText}" Foreground="{StaticResource DangerBrush}" FontWeight="SemiBold" Margin="0,4,0,0" /></StackPanel>
                                                             </UniformGrid>
+                                                            <TextBlock Text="{Binding CompletionCalculationText}" Foreground="{StaticResource SuccessBrush}"
+                                                                       FontWeight="SemiBold" Margin="0,13,0,0" />
                                                             <TextBlock Text="{Binding OvertimeCompositionText}" Style="{StaticResource MutedTextStyle}" Margin="0,13,0,0" />
                                                             <TextBlock Text="{Binding IncomeDetailText}" Style="{StaticResource MutedTextStyle}" Margin="0,4,0,0" />
                                                         </StackPanel>
@@ -1342,9 +1344,15 @@
                                     <TextBlock x:Name="ExpenseDetailSummaryText" Text="暂无消费记录"
                                                Style="{StaticResource MutedTextStyle}" Margin="0,6,0,0" />
                                 </StackPanel>
-                                <Button Content="×" Width="34" Height="34" Padding="0" HorizontalAlignment="Right"
-                                        VerticalAlignment="Top" Background="Transparent" BorderThickness="0" Effect="{x:Null}"
-                                        FontSize="22" Click="CloseExpenseDetailButton_Click" />
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top">
+                                    <Button x:Name="AssignExpenseDayToCurrentGoalButton" Content="转入当前目标"
+                                            Padding="12,6" Margin="0,0,8,0" Visibility="Collapsed"
+                                            Foreground="{StaticResource AccentBrush}"
+                                            Click="AssignExpenseDayToCurrentGoalButton_Click" />
+                                    <Button Content="×" Width="34" Height="34" Padding="0"
+                                            Background="Transparent" BorderThickness="0" Effect="{x:Null}"
+                                            FontSize="22" Click="CloseExpenseDetailButton_Click" />
+                                </StackPanel>
                             </Grid>
 
                             <Border Background="#42FFFFFF" BorderBrush="{StaticResource LineBrush}"

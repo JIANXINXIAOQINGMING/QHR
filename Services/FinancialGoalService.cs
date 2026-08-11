@@ -150,6 +150,8 @@ public sealed class FinancialGoalService
     private static void MigrateGoalProfiles(FinancialGoalData data)
     {
         data.Goals ??= [];
+        data.Expenses ??= [];
+        data.CompletedGoals ??= [];
         foreach (var goal in data.Goals)
         {
             goal.ActivationPeriods ??= [];
@@ -180,7 +182,82 @@ public sealed class FinancialGoalService
         }
 
         if (data.ActiveGoalId is not null && data.ActiveGoal is null) data.ActiveGoalId = null;
+        MigrateExpenseOwnership(data);
         ApplyActiveGoalToLegacy(data);
         data.Version = 5;
     }
+
+    private static void MigrateExpenseOwnership(FinancialGoalData data)
+    {
+        if (data.Expenses.All(item => !string.IsNullOrWhiteSpace(item.GoalId))) return;
+
+        data.Expenses = data.Expenses
+            .Select(expense => string.IsNullOrWhiteSpace(expense.GoalId)
+                ? CloneExpense(expense, ResolveLegacyExpenseGoalId(data, expense))
+                : expense)
+            .ToList();
+    }
+
+    private static string? ResolveLegacyExpenseGoalId(FinancialGoalData data, GoalExpense expense)
+    {
+        if (data.Goals.Count == 0) return null;
+
+        var dayStart = ToLocalTimestamp(expense.Date);
+        var nextDate = expense.Date == DateOnly.MaxValue ? expense.Date : expense.Date.AddDays(1);
+        var dayEnd = expense.Date == DateOnly.MaxValue
+            ? DateTimeOffset.MaxValue
+            : ToLocalTimestamp(nextDate);
+        var candidates = new List<(FinancialGoalProfile Goal, GoalActivationPeriod Period, int Priority)>();
+
+        foreach (var goal in data.Goals)
+        {
+            foreach (var period in goal.ActivationPeriods)
+            {
+                var overlapsExpenseDate = period.StartedAt < dayEnd &&
+                                          (period.EndedAt is null || period.EndedAt > dayStart);
+                if (overlapsExpenseDate)
+                {
+                    // 追溯只转移收入；被转移区间仍代表当时消费原本所属的目标。
+                    candidates.Add((goal, period, period.CountsTowardGoal ? 10 : 30));
+                    continue;
+                }
+
+                // 兼容首次加入消费归属前已经保存过的追溯数据：旧版本会截断原区间，
+                // 但 ReplacedByGoalId 和替换目标的创建时间仍能还原消费的原始归属。
+                if (period.CountsTowardGoal &&
+                    period.EndedAt is DateTimeOffset endedAt &&
+                    !string.IsNullOrWhiteSpace(period.ReplacedByGoalId) &&
+                    period.EndReason.Contains("追溯", StringComparison.Ordinal) &&
+                    data.Goals.FirstOrDefault(item => item.Id == period.ReplacedByGoalId) is { } replacement &&
+                    dayEnd > endedAt && dayStart < replacement.CreatedAt)
+                {
+                    candidates.Add((goal, period, 25));
+                }
+            }
+        }
+
+        var match = candidates
+            .OrderByDescending(item => item.Priority)
+            .ThenByDescending(item => item.Period.StartedAt)
+            .FirstOrDefault();
+        if (match.Goal is not null) return match.Goal.Id;
+
+        // 单目标旧档案中的消费都属于唯一目标；没有目标时则保留为独立账本记录。
+        return data.Goals.Count == 1 ? data.Goals[0].Id : null;
+    }
+
+    private static DateTimeOffset ToLocalTimestamp(DateOnly date)
+    {
+        var local = date.ToDateTime(TimeOnly.MinValue);
+        return new DateTimeOffset(local, TimeZoneInfo.Local.GetUtcOffset(local));
+    }
+
+    private static GoalExpense CloneExpense(GoalExpense source, string? goalId) => new()
+    {
+        Id = source.Id,
+        GoalId = goalId,
+        Date = source.Date,
+        Description = source.Description,
+        Amount = source.Amount
+    };
 }

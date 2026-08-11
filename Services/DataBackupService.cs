@@ -711,6 +711,7 @@ public sealed class DataBackupService
 
     private static bool ExpenseEquals(GoalExpense left, GoalExpense right) =>
         left.Id == right.Id && left.Date == right.Date && left.Amount == right.Amount &&
+        string.Equals(left.GoalId, right.GoalId, StringComparison.Ordinal) &&
         string.Equals(left.Description, right.Description, StringComparison.Ordinal);
 
     private static bool AttachmentEquals(EvidenceAttachment left, EvidenceAttachment right) =>

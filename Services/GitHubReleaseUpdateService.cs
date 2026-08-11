@@ -46,7 +46,7 @@ public sealed class GitHubReleaseUpdateService
         if (string.IsNullOrWhiteSpace(release.AssetDownloadUrl) ||
             string.IsNullOrWhiteSpace(release.AssetName))
         {
-            throw new InvalidOperationException("GitHub Release 中没有可下载的 QHR Windows x64 ZIP");
+            throw new InvalidOperationException("在线更新源中没有可下载的 QHR Windows x64 ZIP");
         }
 
         var safeFileName = Path.GetFileName(release.AssetName);
@@ -57,7 +57,7 @@ public sealed class GitHubReleaseUpdateService
             packageVersion != LocalUpdateService.NormalizeVersion(release.Version))
         {
             throw new InvalidDataException(
-                "在线更新包必须按 QHR.Overtime-v版本-win-x64-Release.zip 命名，且版本应与 Release 一致");
+                "在线更新包必须按 QHR.Overtime-v版本-win-x64-Release.zip 命名，且版本应与在线版本一致");
         }
 
         var downloadDirectory = Path.Combine(
@@ -145,7 +145,7 @@ public sealed class GitHubReleaseUpdateService
         var tag = ReadString(root, "tag_name");
         var name = ReadString(root, "name");
         var version = ParseVersion(tag) ?? ParseVersion(name) ??
-                      throw new InvalidDataException("无法从 GitHub latest release 读取版本号");
+                      throw new InvalidDataException("无法从在线更新源读取最新版本号");
         var asset = root.TryGetProperty("assets", out var assets)
             ? SelectReleaseAsset(assets, version)
             : null;
@@ -171,7 +171,7 @@ public sealed class GitHubReleaseUpdateService
         var releaseUrl = response.RequestMessage?.RequestUri?.ToString() ?? LatestReleasePage;
         var tag = GetTagFromReleaseUrl(releaseUrl);
         var version = ParseVersion(tag) ??
-                      throw new InvalidDataException("无法从 GitHub latest release 页面读取版本号");
+                      throw new InvalidDataException("无法从在线更新页面读取最新版本号");
         var expandedAssetsUrl =
             $"https://github.com/{Repository}/releases/expanded_assets/{Uri.EscapeDataString(tag)}";
         var html = await client.GetStringAsync(expandedAssetsUrl, cancellationToken);
