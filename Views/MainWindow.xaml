@@ -54,7 +54,7 @@
                                 <MenuItem Header="备份全部数据" Click="BackupAllDataMenuItem_Click" />
                                 <MenuItem Header="导入备份" Click="ImportBackupMenuItem_Click" />
                                 <Separator />
-                                <MenuItem x:Name="VersionMenuItem" Header="版本 v1.3.26" IsEnabled="False" />
+                                <MenuItem x:Name="VersionMenuItem" Header="版本 v1.3.27" IsEnabled="False" />
                                 <MenuItem Header="退出登录" Foreground="{StaticResource DangerBrush}" Click="LogoutButton_Click" />
                             </ContextMenu>
                         </Button.ContextMenu>
@@ -943,6 +943,10 @@
                                                 <TextBlock x:Name="GoalRemainingText" Text="还差 ¥ 0.00" FontSize="17" FontWeight="SemiBold" />
                                                 <TextBlock x:Name="GoalEstimatedHoursText" Text="预计还需加班 0 小时"
                                                            Style="{StaticResource MutedTextStyle}" Margin="0,9,0,0" TextWrapping="Wrap" />
+                                                <Button x:Name="ConfirmArchiveGoalButton" Content="确认归档" Visibility="Collapsed"
+                                                        Style="{StaticResource AccentButtonStyle}" Padding="18,8"
+                                                        HorizontalAlignment="Left" Margin="0,14,0,0"
+                                                        Click="ConfirmArchiveGoalButton_Click" />
                                             </StackPanel>
                                         </Border>
                                     </Grid>
@@ -1004,7 +1008,7 @@
                                         <Grid>
                                             <StackPanel>
                                                 <TextBlock Text="历史已完成目标" Style="{StaticResource SectionTitleStyle}" />
-                                                <TextBlock x:Name="CompletedGoalsSummaryText" Text="达成的目标会自动归档到这里"
+                                                <TextBlock x:Name="CompletedGoalsSummaryText" Text="确认归档后的目标会保存在这里"
                                                            Style="{StaticResource MutedTextStyle}" Margin="0,5,0,0" />
                                             </StackPanel>
                                             <Border HorizontalAlignment="Right" VerticalAlignment="Center" Padding="12,6"
@@ -1653,7 +1657,7 @@
                             </Border>
                             <TextBlock Text="恭喜，目标达成！" FontSize="29" FontWeight="SemiBold"
                                        HorizontalAlignment="Center" Margin="0,18,0,0" />
-                            <TextBlock x:Name="GoalCelebrationNameText" Text="目标已完成并归档"
+                            <TextBlock x:Name="GoalCelebrationNameText" Text="目标已达成，等待确认归档"
                                        Foreground="{StaticResource AccentBrush}" FontSize="18" FontWeight="SemiBold"
                                        HorizontalAlignment="Center" Margin="0,8,0,0" />
                             <UniformGrid Columns="3" Margin="0,24,0,0">
@@ -1662,7 +1666,7 @@
                                     <TextBlock x:Name="GoalCelebrationAmountText" Text="¥ 0.00" FontSize="17" FontWeight="SemiBold" Margin="0,6,0,0" />
                                 </StackPanel>
                                 <StackPanel HorizontalAlignment="Center">
-                                    <TextBlock Text="完成时长" Style="{StaticResource MutedTextStyle}" HorizontalAlignment="Center" />
+                                    <TextBlock Text="达成用时" Style="{StaticResource MutedTextStyle}" HorizontalAlignment="Center" />
                                     <TextBlock x:Name="GoalCelebrationDurationText" Text="0 天" FontSize="17" FontWeight="SemiBold" Margin="0,6,0,0" />
                                 </StackPanel>
                                 <StackPanel HorizontalAlignment="Center">
@@ -1670,12 +1674,12 @@
                                     <TextBlock x:Name="GoalCelebrationOvertimeText" Text="0h00m" FontSize="17" FontWeight="SemiBold" Margin="0,6,0,0" />
                                 </StackPanel>
                             </UniformGrid>
-                            <TextBlock x:Name="GoalCelebrationSummaryText" Text="完成信息已安全保存到历史目标"
+                            <TextBlock x:Name="GoalCelebrationSummaryText" Text="目标仍保持当前生效，后续消费会继续扣减"
                                        Style="{StaticResource MutedTextStyle}" HorizontalAlignment="Center"
                                        TextAlignment="Center" TextWrapping="Wrap" Margin="0,22,0,0" />
-                            <Button Content="查看已完成目标" Style="{StaticResource AccentButtonStyle}" Padding="24,10"
+                            <Button Content="知道了，稍后确认归档" Style="{StaticResource AccentButtonStyle}" Padding="24,10"
                                     HorizontalAlignment="Center" Margin="0,22,0,0"
-                                    Click="ViewCompletedGoalsButton_Click" />
+                                    Click="CloseGoalReachedButton_Click" />
                         </StackPanel>
                     </Border>
                 </Grid>

@@ -56,7 +56,6 @@ public partial class MainWindow : Window
     private bool _isLoggingOut;
     private bool _goalLoaded;
     private bool _isCompletingGoal;
-    private string? _deferredGoalCompletionSignature;
     private int _analyticsRangeYears = 1;
     private int _analyticsSelectedYear = DateTime.Today.Year;
     private DateOnly? _openedDetailDate;
@@ -1025,25 +1024,21 @@ public partial class MainWindow : Window
     private void UpdateGoalSummary()
     {
         if (!_goalLoaded) return;
-        var activeGoal = _goalData.ActiveGoal;
-        var scopedRecords = activeGoal is null
-            ? Array.Empty<OvertimeRecord>()
-            : _analysisRecords
-                .Where(item => IsDateAllocatedToGoal(activeGoal, item.Date))
-                .ToArray();
-        var overtimePay = scopedRecords.Sum(item => item.OvertimePay);
-        var mealAllowance = scopedRecords.Sum(item => item.MealAllowance);
-        var earned = overtimePay + (_goalData.IncludeMealAllowance ? mealAllowance : 0);
-        var scopedGoalExpenses = activeGoal is null
-            ? Array.Empty<GoalExpense>()
-            : _goalExpenses.Where(item => item.GoalId == activeGoal.Id).ToArray();
-        var expenses = scopedGoalExpenses.Sum(item => item.Amount);
-        var effective = earned - expenses;
-        var target = _goalData.TargetAmount;
+        var summary = CalculateCurrentGoalProgress();
+        var activeGoal = summary.Goal;
+        var earned = summary.Earned;
+        var expenses = summary.Expenses;
+        var effective = summary.Effective;
+        var target = summary.Target;
         var remaining = target > 0 ? Math.Max(0, target - effective) : 0;
         var progress = target <= 0 ? 0 : Math.Clamp((double)(effective / target * 100m), 0, 100);
-        var totalHours = scopedRecords.Sum(item => item.ActualHours);
+        var totalHours = summary.Records.Sum(item => item.ActualHours);
         var averageHourlyRate = totalHours > 0 ? (double)earned / totalHours : 0;
+        var isReached = activeGoal is not null && target > 0 &&
+                        !string.IsNullOrWhiteSpace(activeGoal.GoalName) && effective >= target;
+        var canEvaluateAchievement = activeGoal is not null &&
+                                     _analysisStartDate is DateOnly loadedStart &&
+                                     loadedStart <= GetGoalEffectiveStartDate(activeGoal);
 
         GoalTitleText.Text = string.IsNullOrWhiteSpace(_goalData.GoalName)
             ? "目标进度"
@@ -1067,91 +1062,169 @@ public partial class MainWindow : Window
         GoalEstimatedHoursText.Text = target <= 0
             ? "填写目标名称、金额和收入计算方式后即可开始追踪"
             : remaining <= 0
-                ? "后续加班收入将继续计入有效金额"
+                ? "目标仍保持当前生效；新消费会继续从净额中扣减"
             : averageHourlyRate > 0
                 ? $"按当前平均 ¥{averageHourlyRate:N2}/h，预计还需加班 {Math.Ceiling((double)remaining / averageHourlyRate):N0} 小时"
                 : "已有加班数据后可估算剩余加班时长";
+        ConfirmArchiveGoalButton.Visibility = isReached ? Visibility.Visible : Visibility.Collapsed;
+        ConfirmArchiveGoalButton.IsEnabled = isReached && !_isCompletingGoal;
         DeleteCurrentGoalButton.IsEnabled =
             _goalData.Goals.Any(item => item.Id == _editingGoalId);
         UpdateExpenseCalendar();
 
-        if (target > 0 && !string.IsNullOrWhiteSpace(_goalData.GoalName) &&
-            !_goalData.SuppressAutomaticCompletion &&
-            effective >= target && !_isCompletingGoal)
+        if (activeGoal is null || _isCompletingGoal || !canEvaluateAchievement) return;
+        if (isReached && activeGoal.ReachedAt is null)
         {
-            if (!ConfirmGoalCompletion(activeGoal!, target, earned, expenses, effective)) return;
-            var completedDate = DateOnly.FromDateTime(DateTime.Today);
-            var effectiveStartDate = GetGoalEffectiveStartDate(activeGoal!);
-            var completedGoal = new CompletedFinancialGoal
-            {
-                GoalName = _goalData.GoalName,
-                TargetAmount = target,
-                StartDate = effectiveStartDate,
-                CompletedDate = completedDate,
-                DurationDays = Math.Max(1, completedDate.DayNumber - effectiveStartDate.DayNumber + 1),
-                IncludedMealAllowance = _goalData.IncludeMealAllowance,
-                OvertimeHours = totalHours,
-                OvertimeDays = scopedRecords.Count(item => item.ActualHours > 0),
-                WorkdayHours = scopedRecords.Where(item => item.Kind == DayKind.Workday).Sum(item => item.ActualHours),
-                WeekendHours = scopedRecords.Where(item => item.Kind == DayKind.Weekend).Sum(item => item.ActualHours),
-                HolidayHours = scopedRecords.Where(item => item.Kind == DayKind.Holiday).Sum(item => item.ActualHours),
-                OvertimePay = overtimePay,
-                MealAllowance = mealAllowance,
-                EarnedAmount = earned,
-                ExpenseAmount = expenses,
-                EffectiveAmount = effective,
-                Expenses = scopedGoalExpenses.ToList()
-            };
-            _ = CompleteGoalAsync(completedGoal);
+            activeGoal.ReachedAt = DateTimeOffset.Now;
+            RefreshGoalProfiles();
+            GoalStatusText.Text = $"“{activeGoal.GoalName}”已达成；确认归档前，新消费仍会继续计入此目标";
+            _ = SaveReachedStateAndCelebrateAsync(activeGoal.Id, activeGoal.ReachedAt.Value, summary);
+        }
+        else if (!isReached && activeGoal.ReachedAt is not null)
+        {
+            activeGoal.ReachedAt = null;
+            RefreshGoalProfiles();
+            GoalStatusText.Text = $"“{activeGoal.GoalName}”扣除最新消费后暂未达成，后续达到时会再次提示";
+            _ = SaveReachedStateAsync();
         }
     }
 
-    private bool ConfirmGoalCompletion(
-        FinancialGoalProfile goal,
-        decimal target,
-        decimal earned,
-        decimal expenses,
-        decimal effective)
+    private GoalProgressSnapshot CalculateCurrentGoalProgress()
     {
-        var signature = string.Create(
-            CultureInfo.InvariantCulture,
-            $"{goal.Id}|{target:F2}|{earned:F2}|{expenses:F2}|{effective:F2}");
-        if (_deferredGoalCompletionSignature == signature) return false;
+        var activeGoal = _goalData.ActiveGoal;
+        var scopedRecords = activeGoal is null
+            ? Array.Empty<OvertimeRecord>()
+            : _analysisRecords
+                .Where(item => IsDateAllocatedToGoal(activeGoal, item.Date))
+                .ToArray();
+        var overtimePay = scopedRecords.Sum(item => item.OvertimePay);
+        var mealAllowance = scopedRecords.Sum(item => item.MealAllowance);
+        var earned = overtimePay + (activeGoal?.IncludeMealAllowance == true ? mealAllowance : 0);
+        var scopedGoalExpenses = activeGoal is null
+            ? Array.Empty<GoalExpense>()
+            : _goalExpenses.Where(item => item.GoalId == activeGoal.Id).ToArray();
+        var expenses = scopedGoalExpenses.Sum(item => item.Amount);
+        return new GoalProgressSnapshot(
+            activeGoal,
+            scopedRecords,
+            scopedGoalExpenses,
+            activeGoal?.TargetAmount ?? 0,
+            overtimePay,
+            mealAllowance,
+            earned,
+            expenses,
+            earned - expenses);
+    }
 
-        var surplus = effective - target;
-        var result = MessageBox.Show(this,
-            $"“{goal.GoalName}”按扣除消费后的净额已经达到目标：\n\n" +
-            $"累计收入　　　¥ {earned:N2}\n" +
-            $"减：本目标消费　¥ {expenses:N2}\n" +
-            $"实际有效金额　　¥ {effective:N2}\n" +
-            $"目标金额　　　¥ {target:N2}\n" +
-            $"超过目标　　　¥ {surplus:N2}\n\n" +
-            "是否确认完成并归档？如果还有未记录的消费，请选择“否”，补录后系统会按新的净额重新判断。",
-            "确认目标完成",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Question);
-        if (result == MessageBoxResult.Yes)
+    private async Task SaveReachedStateAndCelebrateAsync(
+        string goalId,
+        DateTimeOffset reachedAt,
+        GoalProgressSnapshot summary)
+    {
+        if (!await SaveReachedStateAsync()) return;
+        if (_isLoggingOut || _isCompletingGoal || _goalData.ActiveGoal is not { } activeGoal ||
+            activeGoal.Id != goalId || activeGoal.ReachedAt != reachedAt)
+            return;
+
+        var latestSummary = CalculateCurrentGoalProgress();
+        if (latestSummary.Goal?.Id != goalId || latestSummary.Effective < latestSummary.Target) return;
+        ShowGoalReachedCelebration(CreateCompletedGoalSnapshot(latestSummary, reachedAt));
+    }
+
+    private async Task<bool> SaveReachedStateAsync()
+    {
+        try
         {
-            _deferredGoalCompletionSignature = null;
+            await _financialGoalService.SaveAsync(_goalData);
             return true;
         }
-
-        _deferredGoalCompletionSignature = signature;
-        GoalStatusText.Text = $"已暂不归档“{goal.GoalName}”；当前净额 ¥{effective:N2} 已扣除消费 ¥{expenses:N2}";
-        return false;
+        catch (Exception ex)
+        {
+            GoalStatusText.Text = $"目标达成状态暂未保存：{ex.Message}";
+            return false;
+        }
     }
 
-    private async Task CompleteGoalAsync(CompletedFinancialGoal completedGoal)
+    private CompletedFinancialGoal CreateCompletedGoalSnapshot(
+        GoalProgressSnapshot summary,
+        DateTimeOffset? reachedAt = null)
+    {
+        var activeGoal = summary.Goal ?? throw new InvalidOperationException("当前没有可归档的目标");
+        var reachedDate = DateOnly.FromDateTime((reachedAt ?? activeGoal.ReachedAt ?? DateTimeOffset.Now).LocalDateTime);
+        var effectiveStartDate = GetGoalEffectiveStartDate(activeGoal);
+        var totalHours = summary.Records.Sum(item => item.ActualHours);
+        return new CompletedFinancialGoal
+        {
+            GoalName = activeGoal.GoalName,
+            TargetAmount = summary.Target,
+            StartDate = effectiveStartDate,
+            CompletedDate = reachedDate,
+            DurationDays = Math.Max(1, reachedDate.DayNumber - effectiveStartDate.DayNumber + 1),
+            IncludedMealAllowance = activeGoal.IncludeMealAllowance,
+            OvertimeHours = totalHours,
+            OvertimeDays = summary.Records.Count(item => item.ActualHours > 0),
+            WorkdayHours = summary.Records.Where(item => item.Kind == DayKind.Workday).Sum(item => item.ActualHours),
+            WeekendHours = summary.Records.Where(item => item.Kind == DayKind.Weekend).Sum(item => item.ActualHours),
+            HolidayHours = summary.Records.Where(item => item.Kind == DayKind.Holiday).Sum(item => item.ActualHours),
+            OvertimePay = summary.OvertimePay,
+            MealAllowance = summary.MealAllowance,
+            EarnedAmount = summary.Earned,
+            ExpenseAmount = summary.Expenses,
+            EffectiveAmount = summary.Effective,
+            Expenses = summary.GoalExpenses.ToList()
+        };
+    }
+
+    private async void ConfirmArchiveGoalButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await EnsureGoalDataAsync();
+            var summary = CalculateCurrentGoalProgress();
+            var activeGoal = summary.Goal;
+            if (activeGoal is null || summary.Target <= 0 || summary.Effective < summary.Target)
+            {
+                UpdateGoalSummary();
+                MessageBox.Show(this, "当前实际有效金额尚未达到目标，暂时不能归档。",
+                    "目标尚未达成", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            activeGoal.ReachedAt ??= DateTimeOffset.Now;
+            var surplus = summary.Effective - summary.Target;
+            if (MessageBox.Show(this,
+                    $"确定归档“{activeGoal.GoalName}”吗？\n\n" +
+                    $"累计收入　　　¥ {summary.Earned:N2}\n" +
+                    $"减：本目标消费　¥ {summary.Expenses:N2}\n" +
+                    $"实际有效金额　　¥ {summary.Effective:N2}\n" +
+                    $"目标金额　　　¥ {summary.Target:N2}\n" +
+                    $"超过目标　　　¥ {surplus:N2}\n\n" +
+                    "归档后以上数据会成为历史快照，当前目标将清空。",
+                    "确认归档目标",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Question) != MessageBoxResult.Yes)
+                return;
+
+            await ArchiveGoalAsync(CreateCompletedGoalSnapshot(summary));
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "目标归档失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private async Task ArchiveGoalAsync(CompletedFinancialGoal completedGoal)
     {
         if (_isCompletingGoal) return;
         _isCompletingGoal = true;
+        ConfirmArchiveGoalButton.IsEnabled = false;
         try
         {
             var completedProfileId = _goalData.ActiveGoalId;
             var completedProfile = _goalData.ActiveGoal;
             if (completedProfile is not null)
             {
-                CloseOpenGoalPeriod(completedProfile, DateTimeOffset.Now, "目标已完成");
+                CloseOpenGoalPeriod(completedProfile, DateTimeOffset.Now, "目标已确认归档");
             }
             var history = _goalData.CompletedGoals
                 .Where(item => item.Id != completedGoal.Id)
@@ -1185,12 +1258,11 @@ public partial class MainWindow : Window
             ReplaceItems(_completedGoals, history);
             _editingGoalId = null;
             LoadGoalEditor(null);
-            GoalStatusText.Text = $"“{completedGoal.GoalName}”已完成并移入历史目标";
+            GoalCelebrationOverlay.Visibility = Visibility.Collapsed;
+            GoalCelebrationConfettiCanvas.Children.Clear();
+            GoalStatusText.Text = $"“{completedGoal.GoalName}”已确认归档并移入历史目标";
             UpdateCompletedGoalsVisibility();
             UpdateGoalSummary();
-
-            while (_isBusy && !_isLoggingOut) await Task.Delay(100);
-            if (!_isLoggingOut) ShowGoalCelebration(completedGoal);
         }
         catch (Exception ex)
         {
@@ -1199,6 +1271,7 @@ public partial class MainWindow : Window
         finally
         {
             _isCompletingGoal = false;
+            UpdateGoalSummary();
         }
     }
 
@@ -1208,20 +1281,21 @@ public partial class MainWindow : Window
             ? Visibility.Collapsed
             : Visibility.Visible;
         CompletedGoalsSummaryText.Text = _completedGoals.Count == 0
-            ? "达成的目标会自动归档到这里"
+            ? "确认归档后的目标会保存在这里"
             : $"共完成 {_completedGoals.Count} 个目标，最近一次完成于 {_completedGoals[0].CompletedDate:yyyy-MM-dd}";
     }
 
-    private void ShowGoalCelebration(CompletedFinancialGoal completedGoal)
+    private void ShowGoalReachedCelebration(CompletedFinancialGoal completedGoal)
     {
-        GoalCelebrationNameText.Text = $"“{completedGoal.GoalName}”已完成并安全归档";
+        GoalCelebrationNameText.Text = $"“{completedGoal.GoalName}”当前净额已经达到目标";
         GoalCelebrationAmountText.Text = completedGoal.TargetAmountText;
         GoalCelebrationDurationText.Text = completedGoal.DurationText;
         GoalCelebrationOvertimeText.Text = completedGoal.OvertimeHoursText;
         GoalCelebrationSummaryText.Text =
             $"累计收入 {completedGoal.EarnedAmountText} - 期间消费 {completedGoal.ExpenseAmountText} " +
             $"= 实际有效金额 {completedGoal.EffectiveAmountText}\n" +
-            $"加班 {completedGoal.OvertimeDays} 天 · 加班费 {completedGoal.OvertimePayText} · 餐补 {completedGoal.MealAllowanceText}";
+            $"加班 {completedGoal.OvertimeDays} 天 · 加班费 {completedGoal.OvertimePayText} · 餐补 {completedGoal.MealAllowanceText}\n" +
+            "目标仍保持当前生效；补记消费后若净额不足，会自动恢复为未达成。";
         GoalCelebrationOverlay.Visibility = Visibility.Visible;
         GoalCelebrationCard.Opacity = 0;
         GoalCelebrationScale.ScaleX = 0.75;
@@ -1277,11 +1351,11 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ViewCompletedGoalsButton_Click(object sender, RoutedEventArgs e)
+    private void CloseGoalReachedButton_Click(object sender, RoutedEventArgs e)
     {
         GoalCelebrationOverlay.Visibility = Visibility.Collapsed;
         GoalCelebrationConfettiCanvas.Children.Clear();
-        CompletedGoalsBorder.BringIntoView();
+        ConfirmArchiveGoalButton.BringIntoView();
     }
 
     private void EditCompletedGoalButton_Click(object sender, RoutedEventArgs e)
@@ -1420,7 +1494,7 @@ public partial class MainWindow : Window
                 TargetAmount = goal.TargetAmount,
                 StartDate = goal.StartDate,
                 IncludeMealAllowance = goal.IncludedMealAllowance,
-                SuppressAutomaticCompletion = true,
+                SuppressAutomaticCompletion = false,
                 CreatedAt = now,
                 ActivationPeriods = []
             };
@@ -1442,7 +1516,7 @@ public partial class MainWindow : Window
                 TargetAmount = goal.TargetAmount,
                 StartDate = goal.StartDate,
                 IncludeMealAllowance = goal.IncludedMealAllowance,
-                SuppressAutomaticCompletion = true,
+                SuppressAutomaticCompletion = false,
                 Expenses = restoredExpenses,
                 CompletedGoals = history
             };
@@ -3316,6 +3390,17 @@ public partial class MainWindow : Window
         }
         return message;
     }
+
+    private sealed record GoalProgressSnapshot(
+        FinancialGoalProfile? Goal,
+        IReadOnlyList<OvertimeRecord> Records,
+        IReadOnlyList<GoalExpense> GoalExpenses,
+        decimal Target,
+        decimal OvertimePay,
+        decimal MealAllowance,
+        decimal Earned,
+        decimal Expenses,
+        decimal Effective);
 
     public sealed class HolidayDisplayRow
     {

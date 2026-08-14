@@ -30,6 +30,7 @@ public sealed class FinancialGoalProfile
     public DateOnly StartDate { get; set; } = DateOnly.FromDateTime(DateTime.Today);
     public bool IncludeMealAllowance { get; set; }
     public bool SuppressAutomaticCompletion { get; set; }
+    public DateTimeOffset? ReachedAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.Now;
     public List<GoalActivationPeriod> ActivationPeriods { get; set; } = [];
 
@@ -50,6 +51,7 @@ public sealed class FinancialGoalProfile
     {
         get
         {
+            if (ReachedAt is not null) return IsActive ? "已达成，待归档" : "已达成";
             if (IsActive) return "当前生效";
             var latest = ActivationPeriods.OrderByDescending(item => item.StartedAt).FirstOrDefault();
             if (latest is null) return "尚未生效";
